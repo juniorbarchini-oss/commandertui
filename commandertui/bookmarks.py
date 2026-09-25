@@ -33,13 +33,12 @@ def detect_mounted() -> list[Place]:
                 if not user_dir.is_dir():
                     continue
                 # /run/media/<user>/<Label> vs /mnt/<Label> (no user subdir)
-                candidates = (
-                    list(os.scandir(user_dir.path))
-                    if root == "/run/media"
-                    else [user_dir]
-                )
+                candidates = list(os.scandir(user_dir.path)) if root == "/run/media" else [user_dir]
                 for c in candidates:
-                    if c.is_dir():
+                    # An on-demand mount point (e.g. /mnt/i7server) exists as
+                    # an empty directory even when nothing is mounted there --
+                    # os.path.ismount() is what actually tells them apart.
+                    if c.is_dir() and os.path.ismount(c.path):
                         places.append(Place(label=c.name, path=c.path, kind="mounted"))
         except PermissionError:
             continue
@@ -74,6 +73,34 @@ def detect_network_mounts() -> list[Place]:
         return []
 
 
+PROC_MOUNTS = "/proc/mounts"
+
+
+def _unescape_mount_path(path: str) -> str:
+    # /proc/mounts octal-escapes whitespace and backslashes in paths.
+    return path.replace("\\040", " ").replace("\\011", "\t").replace("\\012", "\n").replace("\\134", "\\")
+
+
+def detect_home_mounts() -> list[Place]:
+    """FUSE mounts inside $HOME, e.g. rclone's ~/365 and ~/GoogleDrive.
+    Read from /proc/mounts so only what is live right now shows up."""
+    home = os.path.expanduser("~")
+    try:
+        with open(PROC_MOUNTS) as f:
+            lines = f.readlines()
+    except OSError:
+        return []
+    places: list[Place] = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3 or not parts[2].startswith("fuse."):
+            continue
+        path = _unescape_mount_path(parts[1])
+        if path.startswith(home + os.sep):
+            places.append(Place(label=os.path.basename(path), path=path, kind=parts[2][5:]))
+    return places
+
+
 def load_saved() -> list[Place]:
     if not os.path.isfile(BOOKMARKS_FILE):
         return []
@@ -103,4 +130,4 @@ def remove_bookmark(path: str) -> None:
 
 def all_places() -> list[Place]:
     home = Place(label="Home", path=os.path.expanduser("~"), kind="home")
-    return [home] + detect_mounted() + detect_network_mounts() + load_saved()
+    return [home] + detect_mounted() + detect_network_mounts() + detect_home_mounts() + load_saved()

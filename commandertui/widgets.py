@@ -27,6 +27,7 @@ class FilePanel(Vertical):
 
     path: reactive[str] = reactive(os.path.expanduser("~"))
     active: reactive[bool] = reactive(False)
+    show_hidden: reactive[bool] = reactive(False)
 
     def __init__(self, start_path: str, side: str, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -56,7 +57,10 @@ class FilePanel(Vertical):
         entries: list[os.DirEntry] = []
         try:
             with os.scandir(self.path) as it:
-                entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
+                entries = sorted(
+                    (e for e in it if self.show_hidden or not e.name.startswith(".")),
+                    key=lambda e: (not e.is_dir(), e.name.lower()),
+                )
         except (PermissionError, FileNotFoundError):
             pass
 

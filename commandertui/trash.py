@@ -27,9 +27,7 @@ def send_to_trash(path: str) -> bool:
         pass
 
     try:
-        result = subprocess.run(
-            ["gio", "trash", abs_path], capture_output=True, text=True, timeout=30
-        )
+        result = subprocess.run(["gio", "trash", abs_path], capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             return True
     except Exception:

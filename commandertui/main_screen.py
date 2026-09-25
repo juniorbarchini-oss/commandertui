@@ -9,7 +9,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header
 
 from .compare_screen import CompareScreen
-from .modals import PlacesScreen
+from .modals import InputScreen, MessageScreen, PlacesScreen, SizeScreen
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
@@ -37,11 +37,14 @@ class MainScreen(Screen):
         Binding("space", "toggle_mark", "Mark", priority=True),
         Binding("f5", "copy", "Copy", priority=True),
         Binding("f6", "move", "Move", priority=True),
+        Binding("f7", "make_dir", "MkDir", priority=True),
         Binding("f8", "delete", "Delete", priority=True),
         Binding("delete", "delete", "Delete", priority=True),
         Binding("c", "show_compare", "Compare", priority=True),
         Binding("p", "show_places", "Places", priority=True),
         Binding("r", "refresh_both", "Refresh", priority=True),
+        Binding("h", "toggle_hidden", "Hidden", priority=True),
+        Binding("i", "show_size", "Size", priority=True),
         # "app.quit", not "quit": this binding lives on the Screen, and a bare
         # "quit" resolves against the Screen's own (nonexistent) action_quit
         # rather than bubbling to the App, so it silently did nothing.
@@ -104,6 +107,38 @@ class MainScreen(Screen):
         self._panel("left").refresh_listing()
         self._panel("right").refresh_listing()
 
+    def action_toggle_hidden(self) -> None:
+        show = not self._panel("left").show_hidden
+        for side in ("left", "right"):
+            panel = self._panel(side)
+            panel.show_hidden = show
+            panel.refresh_listing()
+
+    def action_show_size(self) -> None:
+        items = self._active_panel().marked_or_selected()
+        if items:
+            self.app.push_screen(SizeScreen(items))
+
+    # ------------------------------------------------------------- mkdir
+    def action_make_dir(self) -> None:
+        panel = self._active_panel()
+
+        def on_named(name: str | None) -> None:
+            if not name:
+                return
+            target = os.path.join(panel.path, name)
+            try:
+                os.makedirs(target)
+            except FileExistsError:
+                self.app.push_screen(MessageScreen(f"'{name}' already exists."))
+                return
+            except OSError as exc:
+                self.app.push_screen(MessageScreen(f"Could not create '{name}': {exc}"))
+                return
+            panel.refresh_listing()
+
+        self.app.push_screen(InputScreen("New folder name:"), on_named)
+
     # --------------------------------------------------------- op queues
     def action_copy(self) -> None:
         self._run_marked_op(OpKind.COPY, "Copy")
@@ -150,8 +185,12 @@ class MainScreen(Screen):
             dst_panel.refresh_listing()
 
         run_queue_with_progress(
-            self, f"{label} to {dst_panel.path}", queue,
-            self._panel("left").path, self._panel("right").path, after,
+            self,
+            f"{label} to {dst_panel.path}",
+            queue,
+            self._panel("left").path,
+            self._panel("right").path,
+            after,
         )
 
     # ------------------------------------------------------------- misc

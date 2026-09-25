@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
+from dataclasses import replace
 from typing import Callable
 
-from .executor import ExecutionReport, execute
+from .executor import ExecutionReport, TransferStatus, execute
 from .modals import ConfirmScreen, MessageScreen
 from .models import OperationQueue
 from .progress_screen import ProgressScreen
@@ -37,16 +39,38 @@ def run_queue_with_progress(
         owner.app.push_screen(progress)
 
         def work() -> None:
-            def on_progress(done: int, total: int, name: str) -> None:
-                owner.app.call_from_thread(progress.report, done, total, name)
+            last = 0.0
 
-            report = execute(queue, left_root, right_root, on_progress=on_progress)
+            def on_transfer(status: TransferStatus) -> None:
+                # Throttled: a per-chunk UI update would flood the event loop.
+                nonlocal last
+                now = time.monotonic()
+                if now - last >= 0.1 or status.file_done == status.file_total:
+                    last = now
+                    owner.app.call_from_thread(progress.report, replace(status))
+
+            report = execute(
+                queue,
+                left_root,
+                right_root,
+                cancel_check=lambda: progress.cancel_requested,
+                on_transfer=on_transfer,
+            )
 
             def finish() -> None:
                 progress.dismiss()
                 if after:
                     after(report)
-                if report.failed:
+                if report.cancelled:
+                    owner.app.push_screen(
+                        MessageScreen(
+                            "Cancelled.\n\n"
+                            "Files already copied stay at the destination.\n"
+                            "The file in progress was discarded - no half-copied files were left.\n"
+                            "For a move, the source of anything unfinished is still in place."
+                        )
+                    )
+                elif report.failed:
                     lines = "\n".join(f"  {p}: {e}" for p, e in report.failed[:10])
                     owner.app.push_screen(
                         MessageScreen(f"{report.succeeded} ok, {len(report.failed)} failed:\n{lines}")

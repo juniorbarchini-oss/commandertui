@@ -46,8 +46,11 @@ fi
 
 echo "--> /usr/local/bin/commandertui"
 ln -sf "${INSTALL_DIR}/bin/commandertui" /usr/local/bin/commandertui
+echo "--> /usr/local/bin/commandertui-window"
+ln -sf "${INSTALL_DIR}/bin/commandertui-window" /usr/local/bin/commandertui-window
 
 echo "=== Done ==="
 echo "  commandertui              open in \$HOME on both panes"
 echo "  commandertui DIR1 DIR2    open comparing two folders"
+echo "  commandertui-window       same, in its own floating window"
 echo "  sudo ./uninstall.sh       remove it all"
