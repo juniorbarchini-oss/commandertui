@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Resolve real location (follow symlinks), run from the system venv if
-# installed, else from the source tree.
+# Run from a source checkout: uses the checkout's .venv when present.
+# (Installed copies get their own `commandertui` entry point instead.)
 SOURCE_FILE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE_FILE" ]; do
     DIR="$(cd -P "$(dirname "$SOURCE_FILE")" && pwd)"
@@ -9,12 +9,8 @@ while [ -h "$SOURCE_FILE" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE_FILE")/.." && pwd)"
 
-if [ -d "/opt/commandertui/.venv" ]; then
-    PY="/opt/commandertui/.venv/bin/python3"; export PYTHONPATH="/opt/commandertui:${PYTHONPATH:-}"
-elif [ -d "${SCRIPT_DIR}/.venv" ]; then
-    PY="${SCRIPT_DIR}/.venv/bin/python3"; export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
-else
-    PY="python3"; export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
-fi
+PY="python3"
+[ -x "${SCRIPT_DIR}/.venv/bin/python3" ] && PY="${SCRIPT_DIR}/.venv/bin/python3"
+export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
 exec "$PY" -m commandertui.cli "$@"

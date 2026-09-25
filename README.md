@@ -4,18 +4,15 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v0.2.0** — 40/40 tests passing. No
-packaging yet.
+Status: **v1.0.0** — 40/40 tests passing. MIT licensed.
 
 ---
 
 ## Why this exists
 
-Successor to two prior attempts (`FolderWorks` desktop apps, `folder-works-tui`)
-that were retired for cause — see the vault Ficha for `FolderWorks Linux`
-(cancelled: ran an unauthenticated local HTTP server) and the fact that
-`folder-works-tui` never worked and was deleted outright. This project
-deliberately:
+A safe, simple alternative to heavier dual-pane file managers. It was
+written after an earlier attempt of the same idea had to be scrapped for
+running an unauthenticated local HTTP server. This project deliberately:
 
 - **Never opens a network port.** Pure terminal UI (Textual), no HTTP server,
   no webview.
@@ -31,25 +28,53 @@ deliberately:
 
 ## Install
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python main.py [left-dir] [right-dir]
-```
-
-Or system-wide:
+**Arch Linux / Omarchy.** An AUR package is on the way (`yay -S commandertui`).
+Until then, build it from the `PKGBUILD` in this repo. `makepkg` pulls in
+everything it needs:
 
 ```bash
-sudo ./install.sh      # -> /opt/commandertui + /usr/local/bin/commandertui
-commandertui           # run inside the current terminal
-commandertui-window    # open in its own foot window (app-id "commandertui")
-sudo ./uninstall.sh    # add --purge to also remove ~/.config/commandertui
+git clone https://github.com/juniorbarchini-oss/commandertui.git
+cd commandertui/packaging/arch
+makepkg -si
 ```
 
-On Hyprland, a window rule keyed on that app-id makes it float at a fixed
-size, e.g. in `~/.config/hypr/hyprland.lua`:
+Remove it with `sudo pacman -R commandertui`.
+
+**Other distros.** It is a regular Python package (Python 3.11+):
+
+```bash
+pipx install git+https://github.com/juniorbarchini-oss/commandertui.git
+```
+
+**From a source checkout** (development):
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e . -r requirements-dev.txt
+bin/commandertui [left-dir] [right-dir]
+```
+
+## Run
+
+| Command | What it does |
+|---|---|
+| `cmdrtui` | Opens it in its own terminal window. This is also what the **CommanderTUI** app-launcher entry runs |
+| `commandertui` | Runs it inside the terminal you are in |
+| `commandertui DIR1 DIR2` | Opens with those two folders side by side |
+
+`cmdrtui` uses your desktop's default terminal (`xdg-terminal-exec`). If that
+isn't available it tries foot, alacritty, kitty and ghostty. The window
+always gets the app-id/class `commandertui`, so a window-manager rule can
+float it. It needs about 1174x637 px to fit every key hint. On Hyprland:
+
+```ini
+# hyprland.conf
+windowrulev2 = float, class:^(commandertui)$
+windowrulev2 = size 1174 637, class:^(commandertui)$
+windowrulev2 = center, class:^(commandertui)$
+```
 
 ```lua
+-- Omarchy Lua config (~/.config/hypr/hyprland.lua)
 o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } })
 ```
 
@@ -107,7 +132,7 @@ commandertui/
 ├── sync.py               # atomic copy/move (streamed, tmp+replace), checksum verify
 ├── trash.py               # 3-layer safe delete (send2trash / gio trash / manual)
 ├── executor.py             # runs an OperationQueue against the filesystem
-├── bookmarks.py             # detected mounts (USB/SMB) + saved places
+├── bookmarks.py             # detected mounts (USB/SMB/rclone) + saved places
 ├── theme.py                  # green/amber phosphor palettes
 ├── boot.py                    # startup "modem" reveal animation
 ├── widgets.py                  # FilePanel: one pane's directory listing
@@ -134,5 +159,8 @@ filesystem (`tmp_path`). The UI has smoke tests via Textual's `Pilot`
 ## Not in scope
 
 No file preview, no deduplication engine, no desktop GUI wrapper — those are
-different problems; see `FolderWorks Linux`/`FolderWorks Mac` in the vault if
-you need a dedup finder specifically.
+different problems.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
