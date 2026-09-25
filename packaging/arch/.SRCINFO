@@ -1,0 +1,23 @@
+pkgbase = commandertui
+	pkgdesc = Dual-pane retro terminal file manager: compare, sync, copy and move folders
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/juniorbarchini-oss/commandertui
+	arch = any
+	license = MIT
+	checkdepends = python-pytest
+	checkdepends = python-pytest-asyncio
+	makedepends = python-build
+	makedepends = python-installer
+	makedepends = python-setuptools
+	makedepends = python-wheel
+	depends = python
+	depends = python-textual
+	depends = python-send2trash
+	optdepends = xdg-terminal-exec: open cmdrtui in the desktop default terminal
+	optdepends = foot: terminal for cmdrtui when xdg-terminal-exec is not installed
+	optdepends = gvfs: see network shares mounted by Nautilus in Places
+	source = commandertui-1.0.0.tar.gz::https://github.com/juniorbarchini-oss/commandertui/archive/refs/tags/v1.0.0.tar.gz
+	sha256sums = 7eecb4521e6e5c9e72491cbd57b0066f81bb054ed48f9a5affb5ba4e62aefaf5
+
+pkgname = commandertui
