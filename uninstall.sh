@@ -9,7 +9,7 @@ fi
 echo "--> removing /opt/commandertui"
 rm -rf /opt/commandertui
 echo "--> removing /usr/local/bin/commandertui"
-rm -f /usr/local/bin/commandertui
+rm -f /usr/local/bin/commandertui /usr/local/bin/commandertui-window
 
 if [ "${1:-}" = "--purge" ]; then
     echo "--> removing ~/.config/commandertui (bookmarks)"

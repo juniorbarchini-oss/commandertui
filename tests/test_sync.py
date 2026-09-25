@@ -73,7 +73,8 @@ def test_delete_goes_to_trash_not_gone_forever(tmp_path, monkeypatch):
     import commandertui.trash as trash_mod
 
     monkeypatch.setitem(
-        __import__("sys").modules, "send2trash",
+        __import__("sys").modules,
+        "send2trash",
         type("m", (), {"send2trash": staticmethod(fake_send2trash)}),
     )
 
@@ -94,3 +95,36 @@ def test_verify_copy_detects_mismatch(tmp_path):
 
     dst.write_text("payload")
     assert verify_copy(str(src), str(dst)) is True
+
+
+def test_cancel_mid_file_leaves_no_partial_and_no_temp(tmp_path, monkeypatch):
+    import commandertui.sync as sync
+
+    monkeypatch.setattr(sync, "CHUNK_SIZE", 4)
+    src = tmp_path / "big.bin"
+    src.write_bytes(b"x" * 40)
+    dst = tmp_path / "out" / "big.bin"
+    calls = {"n": 0}
+
+    def cancel():
+        calls["n"] += 1
+        return calls["n"] > 3
+
+    result = sync.copy_item(str(src), str(dst), cancel_check=cancel)
+
+    assert result.cancelled and not result.ok
+    assert not dst.exists()
+    assert list((tmp_path / "out").iterdir()) == []
+
+
+def test_cancelled_move_keeps_source(tmp_path, monkeypatch):
+    import commandertui.sync as sync
+
+    monkeypatch.setattr(sync.os, "rename", lambda a, b: (_ for _ in ()).throw(OSError("cross-device")))
+    src = tmp_path / "a.txt"
+    src.write_text("data")
+
+    result = sync.move_item(str(src), str(tmp_path / "b" / "a.txt"), cancel_check=lambda: True)
+
+    assert result.cancelled
+    assert src.read_text() == "data"

@@ -44,3 +44,30 @@ def test_all_places_includes_network_mounts(tmp_path, monkeypatch):
     labels = {p.label for p in bookmarks.all_places()}
 
     assert "Backups @ nas" in labels
+
+
+def test_unmounted_mount_point_is_hidden(tmp_path, monkeypatch):
+    (tmp_path / "i7server").mkdir()
+    monkeypatch.setattr(bookmarks, "MOUNT_ROOTS", (str(tmp_path),))
+    monkeypatch.setattr(bookmarks.os.path, "ismount", lambda p: False)
+    assert bookmarks.detect_mounted() == []
+
+
+def test_home_fuse_mounts_detected_from_proc_mounts(tmp_path, monkeypatch):
+    home = "/home/tester"
+    mounts = tmp_path / "mounts"
+    mounts.write_text(
+        "365: /home/tester/365 fuse.rclone rw 0 0\n"
+        "gdrive: /home/tester/Google\\040Drive fuse.rclone rw 0 0\n"
+        "gvfsd-fuse /run/user/1000/gvfs fuse.gvfsd-fuse rw 0 0\n"
+        "/dev/sda1 /home/tester/data ext4 rw 0 0\n"
+    )
+    monkeypatch.setattr(bookmarks, "PROC_MOUNTS", str(mounts))
+    monkeypatch.setattr(bookmarks.os.path, "expanduser", lambda p: home)
+
+    places = bookmarks.detect_home_mounts()
+
+    assert [(p.label, p.path, p.kind) for p in places] == [
+        ("365", "/home/tester/365", "rclone"),
+        ("Google Drive", "/home/tester/Google Drive", "rclone"),
+    ]

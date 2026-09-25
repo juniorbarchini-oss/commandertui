@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import os
+import stat
 
 from .models import EntryKind, FileEntry
 
 DEFAULT_EXCLUSIONS = {
-    ".git", "__pycache__", ".venv", "venv", "node_modules",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
 }
 
 
@@ -62,6 +69,36 @@ def scan_directory(
 
     walk(root, "")
     return results
+
+
+def tree_stats(paths, cancel_check=None, on_progress=None) -> tuple[int, int, int]:
+    """(files, subfolders, bytes) under `paths`. Read-only, never follows
+    symlinks; the given top-level folders themselves aren't counted."""
+    top = set(paths)
+    stack = list(paths)
+    files = dirs = total = 0
+    while stack:
+        if cancel_check and cancel_check():
+            break
+        p = stack.pop()
+        try:
+            st = os.lstat(p)
+        except OSError:
+            continue
+        if stat.S_ISDIR(st.st_mode):
+            if p not in top:
+                dirs += 1
+            try:
+                with os.scandir(p) as it:
+                    stack.extend(e.path for e in it)
+            except OSError:
+                pass
+        else:
+            files += 1
+            total += st.st_size
+        if on_progress:
+            on_progress(files, dirs, total)
+    return files, dirs, total
 
 
 def path_size(path: str) -> int:

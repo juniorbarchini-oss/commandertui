@@ -123,8 +123,24 @@ class CompareScreen(Screen):
             if d is None:
                 continue
             if d.status == DiffStatus.LEFT_ONLY or (d.status == DiffStatus.MODIFIED and d.left):
-                queue.add(QueuedOp(OpKind.COPY, OpSide.LEFT_TO_RIGHT, rel_path, bool(d.left and d.left.kind.value == "dir"), size=d.left.size if d.left else 0))
+                queue.add(
+                    QueuedOp(
+                        OpKind.COPY,
+                        OpSide.LEFT_TO_RIGHT,
+                        rel_path,
+                        bool(d.left and d.left.kind.value == "dir"),
+                        size=d.left.size if d.left else 0,
+                    )
+                )
             elif d.status == DiffStatus.RIGHT_ONLY:
-                queue.add(QueuedOp(OpKind.COPY, OpSide.RIGHT_TO_LEFT, rel_path, bool(d.right and d.right.kind.value == "dir"), size=d.right.size if d.right else 0))
+                queue.add(
+                    QueuedOp(
+                        OpKind.COPY,
+                        OpSide.RIGHT_TO_LEFT,
+                        rel_path,
+                        bool(d.right and d.right.kind.value == "dir"),
+                        size=d.right.size if d.right else 0,
+                    )
+                )
         self.manual_marks.clear()
         self._run_queue("Copy marked items", queue)

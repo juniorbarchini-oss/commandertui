@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
+import time
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Static
+from textual.widgets import DataTable, Footer, Input, Static
 
 from .bookmarks import Place, all_places
 from .models import OperationQueue
+from .scanner import tree_stats
 
 
 def _human_bytes(n: int) -> str:
@@ -106,6 +110,113 @@ class PlacesScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class InputScreen(ModalScreen[str | None]):
+    """A single text prompt (e.g. new folder name). Enter confirms with the
+    current text, Escape cancels with None -- same shape as ConfirmScreen so
+    callers can use the same push_screen(..., callback) pattern."""
+
+    DEFAULT_CSS = """
+    InputScreen {
+        align: center middle;
+    }
+    #input-box {
+        width: 60;
+        height: auto;
+        border: solid $foreground;
+        padding: 1 2;
+    }
+    #input-box Static {
+        margin-bottom: 1;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def __init__(self, prompt: str) -> None:
+        super().__init__()
+        self.prompt = prompt
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="input-box"):
+            yield Static(self.prompt)
+            yield Input(id="input-field")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip() or None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class SizeScreen(ModalScreen[None]):
+    """Counts files/folders/bytes of the given paths in a worker thread, so a
+    big tree (or a slow network share) never freezes the UI. Closing it
+    early (Escape) stops the count."""
+
+    DEFAULT_CSS = """
+    SizeScreen {
+        align: center middle;
+    }
+    #size-box {
+        width: 60;
+        height: auto;
+        border: solid $foreground;
+        padding: 1 2;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "close", "Close", priority=True),
+        Binding("enter", "close", "Close", priority=True),
+    ]
+
+    def __init__(self, paths: list[str]) -> None:
+        super().__init__()
+        self.paths = paths
+        self.cancelled = False
+        self.label = os.path.basename(paths[0]) if len(paths) == 1 else f"{len(paths)} items"
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="size-box"):
+            yield Static(f"{self.label}\n\n  Calculating...", id="size-text")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.run_worker(self._work, thread=True)
+
+    def _work(self) -> None:
+        last = 0.0
+
+        def on_progress(files: int, dirs: int, total: int) -> None:
+            nonlocal last
+            now = time.monotonic()
+            if now - last >= 0.2:
+                last = now
+                self.app.call_from_thread(self._show, files, dirs, total, False)
+
+        files, dirs, total = tree_stats(self.paths, lambda: self.cancelled, on_progress)
+        if not self.cancelled:
+            self.app.call_from_thread(self._show, files, dirs, total, True)
+
+    def _show(self, files: int, dirs: int, total: int, done: bool) -> None:
+        if self.cancelled or not self.is_mounted:
+            return
+        status = "" if done else "  Calculating...\n"
+        self.query_one("#size-text", Static).update(
+            f"{self.label}\n\n{status}"
+            f"  {files:,} files, {dirs:,} folders\n"
+            f"  {_human_bytes(total)}  ({total:,} bytes)"
+        )
+
+    def action_close(self) -> None:
+        self.cancelled = True
+        self.dismiss(None)
+
+
 class MessageScreen(ModalScreen[None]):
     """A short result notice (e.g. failures after an operation ran)."""
 
@@ -116,7 +227,7 @@ class MessageScreen(ModalScreen[None]):
     #msg-box {
         width: 60;
         height: auto;
-        border: solid $danger;
+        border: solid $error;
         padding: 1 2;
     }
     """
