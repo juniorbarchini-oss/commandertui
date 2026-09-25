@@ -16,7 +16,7 @@ optdepends=(
   'gvfs: see network shares mounted by Nautilus in Places'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('7eecb4521e6e5c9e72491cbd57b0066f81bb054ed48f9a5affb5ba4e62aefaf5')
 
 build() {
   cd "$pkgname-$pkgver"

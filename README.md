@@ -161,6 +161,13 @@ filesystem (`tmp_path`). The UI has smoke tests via Textual's `Pilot`
 No file preview, no deduplication engine, no desktop GUI wrapper — those are
 different problems.
 
+## Credits
+
+Designed and tested by Humberto Barchini. The code was written together
+with [Claude](https://www.anthropic.com/claude) (Anthropic) through
+[Claude Code](https://claude.com/claude-code): **Claude Sonnet 5** built the
+first version, **Claude Opus 5.5** did most of v0.2 and the v1.0 packaging.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
