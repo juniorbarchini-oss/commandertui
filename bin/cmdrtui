@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Opens CommanderTUI in its own terminal window with app-id/class
+# "commandertui", so a window manager rule can float/center/size it.
+# Uses the desktop's default terminal (xdg-terminal-exec) when available.
+SOURCE_FILE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE_FILE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE_FILE")" && pwd)"
+    SOURCE_FILE="$(readlink "$SOURCE_FILE")"
+    [[ $SOURCE_FILE != /* ]] && SOURCE_FILE="$DIR/$SOURCE_FILE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE_FILE")" && pwd)"
+
+APP="${BIN_DIR}/commandertui"
+[ -x "$APP" ] || APP="commandertui"
+
+ID="commandertui"
+TITLE="CommanderTUI"
+
+if command -v xdg-terminal-exec >/dev/null 2>&1; then
+    exec xdg-terminal-exec --app-id="$ID" --title="$TITLE" -- "$APP" "$@"
+elif command -v foot >/dev/null 2>&1; then
+    exec foot --app-id="$ID" --title="$TITLE" "$APP" "$@"
+elif command -v alacritty >/dev/null 2>&1; then
+    exec alacritty --class "$ID" --title "$TITLE" -e "$APP" "$@"
+elif command -v kitty >/dev/null 2>&1; then
+    exec kitty --class "$ID" --title "$TITLE" "$APP" "$@"
+elif command -v ghostty >/dev/null 2>&1; then
+    exec ghostty --class="$ID" --title="$TITLE" -e "$APP" "$@"
+fi
+
+echo "cmdrtui: no supported terminal found (xdg-terminal-exec, foot, alacritty, kitty, ghostty)." >&2
+echo "Run 'commandertui' inside any terminal instead." >&2
+exit 1

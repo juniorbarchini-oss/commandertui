@@ -1,0 +1,39 @@
+# Maintainer: Humberto Barchini
+
+pkgname=commandertui
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Dual-pane retro terminal file manager: compare, sync, copy and move folders"
+arch=('any')
+url="https://github.com/juniorbarchini-oss/commandertui"
+license=('MIT')
+depends=('python' 'python-textual' 'python-send2trash')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+checkdepends=('python-pytest' 'python-pytest-asyncio')
+optdepends=(
+  'xdg-terminal-exec: open cmdrtui in the desktop default terminal'
+  'foot: terminal for cmdrtui when xdg-terminal-exec is not installed'
+  'gvfs: see network shares mounted by Nautilus in Places'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  python -m pytest -q tests
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm755 bin/cmdrtui "$pkgdir/usr/bin/cmdrtui"
+  install -Dm644 data/commandertui.desktop "$pkgdir/usr/share/applications/commandertui.desktop"
+  install -Dm644 data/commandertui.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/commandertui.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
