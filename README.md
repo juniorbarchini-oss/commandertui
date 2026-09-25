@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: in development (last release **v0.1.0**) — 40/40 tests passing. No
+Status: **v0.2.0** — 40/40 tests passing. No
 packaging yet.
 
 ---
