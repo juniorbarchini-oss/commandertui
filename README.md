@@ -4,8 +4,8 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v0.1.0** — core engine + working UI, 22/22 tests passing. No
-release/packaging yet.
+Status: in development (last release **v0.1.0**) — 40/40 tests passing. No
+packaging yet.
 
 ---
 
@@ -41,8 +41,16 @@ Or system-wide:
 
 ```bash
 sudo ./install.sh      # -> /opt/commandertui + /usr/local/bin/commandertui
-commandertui
+commandertui           # run inside the current terminal
+commandertui-window    # open in its own foot window (app-id "commandertui")
 sudo ./uninstall.sh    # add --purge to also remove ~/.config/commandertui
+```
+
+On Hyprland, a window rule keyed on that app-id makes it float at a fixed
+size, e.g. in `~/.config/hypr/hyprland.lua`:
+
+```lua
+o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } })
 ```
 
 ## Keys
@@ -55,11 +63,24 @@ sudo ./uninstall.sh    # add --purge to also remove ~/.config/commandertui
 | `Space` | Mark/unmark item under cursor |
 | `F5` | Copy marked (or item under cursor) to the other pane |
 | `F6` | Move marked to the other pane |
+| `F7` | Create a folder in the active pane |
 | `F8` / `Delete` | Delete marked (to trash) |
-| `p` | Places: jump to a mounted drive (USB/SMB) or saved bookmark |
+| `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
+| `h` | Show/hide hidden (dot) files in both panes |
+| `p` | Places: jump to a mounted drive (USB/SMB/rclone) or saved bookmark |
 | `c` | Compare: full recursive diff between the two panes' current folders |
 | `r` | Refresh both panes |
 | `q` | Quit |
+
+While a copy/move runs, the progress window shows two bars (current file
+and whole job, by bytes) plus speed in Mb/s and time left. `Esc` asks to
+cancel: finished files stay, the file in progress is discarded (never left
+half-written), and a move never removes a source it didn't fully copy.
+
+**Places** lists only what is mounted right now: USB drives
+(`/run/media`, `/media`, `/mnt` — checked with `ismount`, so an empty
+on-demand mount point doesn't show), GVFS/Nautilus network shares, FUSE
+mounts inside `$HOME` (e.g. `rclone mount`), and saved bookmarks.
 
 Inside **Compare**:
 
@@ -90,7 +111,9 @@ commandertui/
 ├── theme.py                  # green/amber phosphor palettes
 ├── boot.py                    # startup "modem" reveal animation
 ├── widgets.py                  # FilePanel: one pane's directory listing
-├── modals.py                    # ConfirmScreen / PlacesScreen / MessageScreen
+├── modals.py                    # Confirm / Places / Input / Size / Message screens
+├── progress_screen.py            # two-bar transfer progress + cancel
+├── run_queue.py                   # confirm -> run queue in a worker thread
 ├── compare_screen.py              # full diff view + bulk/manual sync actions
 ├── app.py                          # CommanderApp: wires panes + keybindings
 └── cli.py                           # argument parsing, entrypoint
@@ -101,6 +124,7 @@ commandertui/
 ```bash
 pip install -r requirements-dev.txt
 pytest
+black commandertui tests   # formatter, line length set in pyproject.toml
 ```
 
 Engine (scanner/diff/plan/sync/executor) is fully unit tested against a real
