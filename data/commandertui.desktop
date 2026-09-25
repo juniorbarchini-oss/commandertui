@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CommanderTUI
+GenericName=File Manager
+Comment=Dual-pane retro terminal file manager: compare, sync, copy and move folders
+Exec=cmdrtui
+Icon=commandertui
+Terminal=false
+Categories=System;FileTools;FileManager;
+Keywords=files;folders;compare;sync;copy;commander;tui;
+StartupWMClass=commandertui
