@@ -16,14 +16,31 @@ APP="${BIN_DIR}/commandertui"
 ID="commandertui"
 TITLE="CommanderTUI"
 
-if command -v xdg-terminal-exec >/dev/null 2>&1; then
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    KITTY_BIN=""
+    if command -v kitty >/dev/null 2>&1; then
+        KITTY_BIN="$(command -v kitty)"
+    elif [ -x "/Applications/kitty.app/Contents/MacOS/kitty" ]; then
+        KITTY_BIN="/Applications/kitty.app/Contents/MacOS/kitty"
+    elif [ -x "/opt/homebrew/bin/kitty" ]; then
+        KITTY_BIN="/opt/homebrew/bin/kitty"
+    fi
+
+    if [ -n "$KITTY_BIN" ]; then
+        exec "$KITTY_BIN" --title "$TITLE" -o remember_window_size=no -o initial_window_width=1174 -o initial_window_height=637 "$APP" "$@"
+    elif command -v ghostty >/dev/null 2>&1; then
+        exec ghostty --title="$TITLE" -e "$APP" "$@"
+    elif command -v alacritty >/dev/null 2>&1; then
+        exec alacritty --title "$TITLE" -e "$APP" "$@"
+    fi
+elif command -v xdg-terminal-exec >/dev/null 2>&1; then
     exec xdg-terminal-exec --app-id="$ID" --title="$TITLE" -- "$APP" "$@"
 elif command -v foot >/dev/null 2>&1; then
     exec foot --app-id="$ID" --title="$TITLE" "$APP" "$@"
 elif command -v alacritty >/dev/null 2>&1; then
     exec alacritty --class "$ID" --title "$TITLE" -e "$APP" "$@"
 elif command -v kitty >/dev/null 2>&1; then
-    exec kitty --class "$ID" --title "$TITLE" "$APP" "$@"
+    exec kitty --class "$ID" --title "$TITLE" -o remember_window_size=no -o initial_window_width=1174 -o initial_window_height=637 "$APP" "$@"
 elif command -v ghostty >/dev/null 2>&1; then
     exec ghostty --class="$ID" --title="$TITLE" -e "$APP" "$@"
 fi
