@@ -1,7 +1,7 @@
 # Maintainer: Humberto Barchini
 
 pkgname=commandertui
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="Dual-pane retro terminal file manager: compare, sync, copy and move folders"
 arch=('any')

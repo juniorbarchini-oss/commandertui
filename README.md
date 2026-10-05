@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.0.0** — 40/40 tests passing. MIT licensed.
+Status: **v1.1.0** — tests passing. MIT licensed.
 
 ---
 
@@ -45,6 +45,22 @@ Remove it with `sudo pacman -R commandertui`.
 ```bash
 pipx install git+https://github.com/juniorbarchini-oss/commandertui.git
 ```
+
+**macOS.** Same Python package (`pipx install ...` as above), plus
+[kitty](https://sw.kovidgoyal.net/kitty/) for the standalone window. Places
+lists the volumes under `/Volumes` (system volumes such as Recovery and
+Preboot are hidden) and FUSE mounts inside your home folder. To get a
+double-clickable app with the CommanderTUI icon:
+
+```bash
+packaging/macos/build_app.sh            # builds packaging/macos/CommanderTUI.app
+packaging/macos/build_app.sh --install  # also copies it to /Applications
+```
+
+The app opens kitty at 1174x637 px and runs `commandertui`. It looks for the
+command in `~/.local/bin` (pipx), Homebrew, `/usr/local/bin`, your `PATH`,
+and a source checkout's `.venv`. Tested by the author on macOS with a Time
+Machine volume, Google Drive and OneDrive mounts.
 
 **From a source checkout** (development):
 
