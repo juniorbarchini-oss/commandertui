@@ -1,9 +1,15 @@
+import os
+
 from commandertui.diff import compare
 from commandertui.executor import execute
 from commandertui.plan import plan_mirror
 
 
-def test_execute_mirror_makes_right_match_left(tmp_path):
+def test_execute_mirror_makes_right_match_left(tmp_path, monkeypatch):
+    import commandertui.sync as sync_mod
+
+    monkeypatch.setattr(sync_mod, "send_to_trash", lambda p: os.remove(p) or True)
+
     left = tmp_path / "left"
     right = tmp_path / "right"
     left.mkdir()
