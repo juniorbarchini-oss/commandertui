@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -e
+
+# 1. Locate Kitty
+KITTY=""
+if [ -x "/Applications/kitty.app/Contents/MacOS/kitty" ]; then
+    KITTY="/Applications/kitty.app/Contents/MacOS/kitty"
+elif [ -x "/opt/homebrew/bin/kitty" ]; then
+    KITTY="/opt/homebrew/bin/kitty"
+elif command -v kitty >/dev/null 2>&1; then
+    KITTY="$(command -v kitty)"
+fi
+
+if [ -z "$KITTY" ]; then
+    osascript -e 'display alert "Kitty not found" message "CommanderTUI requires kitty terminal. Please install kitty (/Applications/kitty.app or brew install --cask kitty)."'
+    exit 1
+fi
+
+# 2. Locate commandertui
+CMD=""
+if [ -x "$HOME/.local/bin/commandertui" ]; then
+    CMD="$HOME/.local/bin/commandertui"
+elif [ -x "/opt/homebrew/bin/commandertui" ]; then
+    CMD="/opt/homebrew/bin/commandertui"
+elif [ -x "/usr/local/bin/commandertui" ]; then
+    CMD="/usr/local/bin/commandertui"
+elif command -v commandertui >/dev/null 2>&1; then
+    CMD="$(command -v commandertui)"
+elif [ -x "$HOME/desarrollo/commandertui/.venv/bin/commandertui" ]; then
+    CMD="$HOME/desarrollo/commandertui/.venv/bin/commandertui"
+elif [ -x "$HOME/desarrollo/commandertui/bin/commandertui" ]; then
+    CMD="$HOME/desarrollo/commandertui/bin/commandertui"
+fi
+
+if [ -z "$CMD" ]; then
+    osascript -e 'display alert "CommanderTUI not found" message "Could not find commandertui executable. Please install it (e.g. via pipx install commandertui)."'
+    exit 1
+fi
+
+# 3. Launch Kitty with exact window size (1174x637) and CommanderTUI
+exec "$KITTY" \
+    --title "CommanderTUI" \
+    -o remember_window_size=no \
+    -o initial_window_width=1174 \
+    -o initial_window_height=637 \
+    -d "$HOME" \
+    "$CMD" "$@"
