@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.1.0** — tests passing. MIT licensed.
+Status: **v1.1.0** — 43/43 tests passing. MIT licensed.
 
 ---
 
@@ -40,13 +40,19 @@ makepkg -si
 
 Remove it with `sudo pacman -R commandertui`.
 
-**Other distros.** It is a regular Python package (Python 3.11+):
+**PyPI (Linux / macOS / WSL).** It is a standard package on [PyPI](https://pypi.org/project/commandertui/) (Python 3.11+). Recommended via `pipx`:
 
 ```bash
-pipx install git+https://github.com/juniorbarchini-oss/commandertui.git
+pipx install commandertui
 ```
 
-**macOS.** Same Python package (`pipx install ...` as above), plus
+Or inside an activated virtual environment:
+
+```bash
+pip install commandertui
+```
+
+**macOS.** Same Python package (`pipx install commandertui`), plus
 [kitty](https://sw.kovidgoyal.net/kitty/) for the standalone window. Places
 lists the volumes under `/Volumes` (system volumes such as Recovery and
 Preboot are hidden) and FUSE mounts inside your home folder. To get a
