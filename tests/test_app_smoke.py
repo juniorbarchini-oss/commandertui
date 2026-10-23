@@ -239,3 +239,37 @@ async def test_copy_with_nothing_selected_says_so(tmp_path):
         await pilot.pause()
         assert not isinstance(app.screen, ConfirmScreen)
         assert any("Nothing selected" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_places_buttons_close_and_add(tmp_path):
+    from commandertui.modals import ADD_NETWORK, PlacesScreen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    results = []
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        app.push_screen(PlacesScreen(), results.append)
+        await pilot.pause()
+        await pilot.click("#close")
+        await pilot.pause()
+        app.push_screen(PlacesScreen(), results.append)
+        await pilot.pause()
+        await pilot.click("#add")
+        await pilot.pause()
+    assert results == [None, ADD_NETWORK]
+
+
+@pytest.mark.asyncio
+async def test_choice_cancel_button(tmp_path):
+    from commandertui.modals import ChoiceScreen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    results = []
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        app.push_screen(ChoiceScreen("Protocol", ["SMB", "SFTP", "FTP"]), results.append)
+        await pilot.pause()
+        await pilot.click("#cancel")
+        await pilot.pause()
+    assert results == [None]
