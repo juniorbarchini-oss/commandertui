@@ -120,7 +120,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
 | `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one |
-| `c` | Compare: full recursive diff between the two panes' current folders |. Shows size and date of both sides, and which one is newer when a file changed
+| `c` | Compare: full recursive diff between the two panes' current folders, with size and date of both sides (and which is newer when a file changed) |
 | `r` | Refresh both panes |
 | `q` | Quit |
 
