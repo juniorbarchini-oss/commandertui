@@ -176,6 +176,18 @@ FnButton:hover {{
     color: {p['background']};
 }}
 
+.pathrow {{
+    height: 1;
+}}
+
+.pathrow .pathbar {{
+    width: 1fr;
+}}
+
+.pathrow .pathfree {{
+    width: auto;
+}}
+
 .pathbar {{
     color: {p['dim']};
     padding: 0 1;

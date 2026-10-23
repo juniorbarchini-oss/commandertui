@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import datetime
 
 from textual.app import ComposeResult
@@ -20,6 +21,23 @@ def _human_size(n: int) -> str:
     return f"{size:.1f}T"
 
 
+def _free_space_label(path: str) -> str:
+    """"48.2 GB free" for the filesystem under `path`, or "" if it can't say
+    (permission, vanished mount, FUSE that reports nothing)."""
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return ""
+    if usage.total <= 0:
+        return ""
+    size = float(usage.free)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit} free"
+        size /= 1024
+    return ""
+
+
 class FilePanel(Vertical):
     """One side of the dual-pane view: a single-directory listing you can
     navigate, mark entries in, and read the current path from.
@@ -37,7 +55,9 @@ class FilePanel(Vertical):
         self._rows: list[tuple[str, bool]] = []  # (name, is_dir), in display order
 
     def compose(self) -> ComposeResult:
-        yield Static(self.path, id=f"{self.side}-pathbar", classes="pathbar")
+        with Horizontal(classes="pathrow"):
+            yield Static(self.path, id=f"{self.side}-pathbar", classes="pathbar")
+            yield Static("", id=f"{self.side}-free", classes="pathbar pathfree")
         table = DataTable(id=f"{self.side}-table", cursor_type="row")
         table.add_columns(" ", "Name", "Size", "Modified")
         yield table
@@ -46,8 +66,8 @@ class FilePanel(Vertical):
         self.refresh_listing()
 
     def watch_active(self, active: bool) -> None:
-        bar = self.query_one(f"#{self.side}-pathbar", Static)
-        bar.set_class(active, "active")
+        for suffix in ("pathbar", "free"):
+            self.query_one(f"#{self.side}-{suffix}", Static).set_class(active, "active")
         self.set_class(active, "active-panel")
 
     def refresh_listing(self) -> None:
@@ -82,8 +102,8 @@ class FilePanel(Vertical):
             table.add_row(mark, display_name, size, mtime, key=entry.name)
             self._rows.append((entry.name, is_dir))
 
-        bar = self.query_one(f"#{self.side}-pathbar", Static)
-        bar.update(self.path)
+        self.query_one(f"#{self.side}-pathbar", Static).update(self.path)
+        self.query_one(f"#{self.side}-free", Static).update(_free_space_label(self.path))
 
     def move_cursor_to(self, name: str) -> None:
         """Put the cursor on `name` (e.g. after a rename); no-op if absent."""

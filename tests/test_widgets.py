@@ -34,3 +34,16 @@ async def test_marking_does_not_reset_cursor_to_top(tmp_path):
 
         assert table.cursor_coordinate.row == row_before
         assert len(panel.marked) == 1
+
+
+def test_free_space_label_for_a_real_directory(tmp_path):
+    from commandertui.widgets import _free_space_label
+
+    label = _free_space_label(str(tmp_path))
+    assert label.endswith(" free") and label.split()[1] in ("B", "KB", "MB", "GB", "TB")
+
+
+def test_free_space_label_is_empty_when_path_is_gone(tmp_path):
+    from commandertui.widgets import _free_space_label
+
+    assert _free_space_label(str(tmp_path / "missing")) == ""
