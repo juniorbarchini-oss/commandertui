@@ -82,6 +82,40 @@ DataTable > .datatable--even-row {{
     background: {p['background']};
 }}
 
+ConfirmScreen #confirm-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
+ConfirmScreen #confirm-box.danger {{
+    color: {p['danger']};
+    border: heavy {p['danger']};
+}}
+
+ConfirmScreen Button {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: tall {p['foreground']};
+    text-style: none;
+}}
+
+ConfirmScreen Button.danger {{
+    color: {p['danger']};
+    border: tall {p['danger']};
+}}
+
+ConfirmScreen Button:focus {{
+    background: {p['foreground']};
+    color: {p['background']};
+    text-style: bold;
+}}
+
+ConfirmScreen Button.danger:focus {{
+    background: {p['danger']};
+    color: {p['background']};
+}}
+
 .pathbar {{
     color: {p['dim']};
     padding: 0 1;
