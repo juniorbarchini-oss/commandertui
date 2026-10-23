@@ -7,9 +7,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Static
+from textual.widgets import DataTable, Footer, Input, OptionList, Static
 
-from .bookmarks import Place, all_places
+from .bookmarks import Place, all_places, remove_bookmark
+from .netlocations import remove_location
 from .models import OperationQueue
 from .scanner import tree_stats
 
@@ -72,6 +73,9 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+ADD_NETWORK = "\0add-network"  # sentinel PlacesScreen dismisses with to start the add-network flow
+
+
 class PlacesScreen(ModalScreen[str | None]):
     """Quick-jump to a mounted drive (USB/SMB/local) or a saved bookmark,
     instead of typing the path."""
@@ -88,7 +92,11 @@ class PlacesScreen(ModalScreen[str | None]):
     }
     """
 
-    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+    BINDINGS = [
+        Binding("a", "add_network", "Add network", priority=True),
+        Binding("d", "delete_saved", "Delete saved", priority=True),
+        Binding("escape", "cancel", "Cancel", priority=True),
+    ]
 
     def compose(self) -> ComposeResult:
         table = DataTable(id="places-table", cursor_type="row")
@@ -98,10 +106,30 @@ class PlacesScreen(ModalScreen[str | None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._fill()
+
+    def _fill(self) -> None:
         table = self.query_one("#places-table", DataTable)
+        table.clear()
         self.places: list[Place] = all_places()
         for place in self.places:
             table.add_row(place.kind, place.label, place.path, key=place.path)
+
+    def action_add_network(self) -> None:
+        self.dismiss(ADD_NETWORK)
+
+    def action_delete_saved(self) -> None:
+        table = self.query_one("#places-table", DataTable)
+        if not self.places or table.cursor_row >= len(self.places):
+            return
+        place = self.places[table.cursor_row]
+        if place.kind == "net-saved":
+            remove_location(place.path)
+        elif place.kind == "saved":
+            remove_bookmark(place.path)
+        else:
+            return
+        self._fill()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self.dismiss(str(event.row_key.value))
@@ -247,4 +275,43 @@ class MessageScreen(ModalScreen[None]):
         yield Footer()
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class ChoiceScreen(ModalScreen[str | None]):
+    """Pick one item from a short list; Escape cancels with None."""
+
+    DEFAULT_CSS = """
+    ChoiceScreen {
+        align: center middle;
+    }
+    #choice-box {
+        width: 60;
+        height: auto;
+        max-height: 20;
+        border: solid $foreground;
+        padding: 1 2;
+    }
+    #choice-box Static {
+        margin-bottom: 1;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def __init__(self, prompt: str, options: list[str]) -> None:
+        super().__init__()
+        self.prompt = prompt
+        self.options = options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="choice-box"):
+            yield Static(self.prompt)
+            yield OptionList(*self.options)
+        yield Footer()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(self.options[event.option_index])
+
+    def action_cancel(self) -> None:
         self.dismiss(None)

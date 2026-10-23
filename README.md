@@ -114,7 +114,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `F8` / `Delete` | Delete marked (to trash) |
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
-| `p` | Places: jump to a mounted drive (USB/SMB/rclone) or saved bookmark |
+| `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `d` delete a saved one |
 | `c` | Compare: full recursive diff between the two panes' current folders |
 | `r` | Refresh both panes |
 | `q` | Quit |
@@ -128,6 +128,14 @@ half-written), and a move never removes a source it didn't fully copy.
 (`/run/media`, `/media`, `/mnt` — checked with `ismount`, so an empty
 on-demand mount point doesn't show), GVFS/Nautilus network shares, FUSE
 mounts inside `$HOME` (e.g. `rclone mount`), and saved bookmarks.
+
+**Network locations (Linux, needs `gio`/GVFS):** in Places press `a`, pick
+SMB, SFTP or FTP and type the server's IP or name. For SMB the app lists the
+shares on the server and you pick one; SFTP/FTP connect straight in. The
+location is saved in `~/.config/commandertui/network.json` (protocol, host
+and share only -- never a password) and reappears in Places, mounting itself
+when picked. If the server asks for a login, `gio` asks for it in the
+terminal and can remember it in the system keyring, exactly like Nautilus.
 
 Inside **Compare**:
 
@@ -155,6 +163,7 @@ commandertui/
 ├── trash.py               # 3-layer safe delete (send2trash / gio trash / manual)
 ├── executor.py             # runs an OperationQueue against the filesystem
 ├── bookmarks.py             # detected mounts (USB/SMB/rclone) + saved places
+├── netlocations.py           # SMB/SFTP/FTP locations via gio (list shares, mount, save)
 ├── theme.py                  # green/amber phosphor palettes
 ├── boot.py                    # startup "modem" reveal animation
 ├── widgets.py                  # FilePanel: one pane's directory listing
