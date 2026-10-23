@@ -205,3 +205,37 @@ async def test_progress_cancel_button_asks_then_cancels(tmp_path):
         await pilot.click("#yes-cancel")
         await pilot.pause()
         assert screen.cancel_requested
+
+
+@pytest.mark.asyncio
+async def test_active_panel_is_marked_and_follows_tab(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(130, 30)) as pilot:
+        await _skip_boot(pilot)
+        assert app._panel("left").has_class("active-panel")
+        assert not app._panel("right").has_class("active-panel")
+        await pilot.press("tab")
+        assert app._panel("right").has_class("active-panel")
+        assert not app._panel("left").has_class("active-panel")
+
+
+@pytest.mark.asyncio
+async def test_function_bar_click_runs_the_action(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(130, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("down", "space")
+        await pilot.click("#fn-1")  # F5 Copy
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+
+
+@pytest.mark.asyncio
+async def test_copy_with_nothing_selected_says_so(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(130, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("tab", "f5")  # right pane is empty
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmScreen)
+        assert any("Nothing selected" in n.message for n in app._notifications)

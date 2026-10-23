@@ -116,13 +116,48 @@ ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
     color: {p['background']};
 }}
 
+FilePanel {{
+    border: round {p['dim']};
+}}
+
+FilePanel.active-panel {{
+    border: heavy {p['foreground']};
+}}
+
+DataTable:blur > .datatable--cursor {{
+    background: {p['dim']};
+    color: {p['background']};
+}}
+
+FunctionBar {{
+    height: 3;
+    background: {p['background']};
+}}
+
+FnButton {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: round {p['foreground']};
+    min-width: 0;
+    width: auto;
+    padding: 0;
+    margin: 0;
+    text-style: none;
+}}
+
+FnButton:hover {{
+    background: {p['foreground']};
+    color: {p['background']};
+}}
+
 .pathbar {{
     color: {p['dim']};
     padding: 0 1;
 }}
 
 .pathbar.active {{
-    color: {p['accent']};
+    background: {p['foreground']};
+    color: {p['background']};
     text-style: bold;
 }}
 """
