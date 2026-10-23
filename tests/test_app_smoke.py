@@ -814,3 +814,85 @@ def test_editor_command_prefers_visual_then_editor_then_fallback(monkeypatch):
     assert editor.editor_command() is None
     monkeypatch.setenv("EDITOR", "does-not-exist")
     assert editor.editor_command() is None
+
+
+def test_compare_side_info_and_status_text():
+    from commandertui.compare_screen import side_info, status_text
+    from commandertui.models import DiffEntry, DiffStatus, EntryKind, FileEntry
+
+    older = FileEntry("a.txt", "a.txt", EntryKind.FILE, 2048, 1_700_000_000)
+    newer = FileEntry("a.txt", "a.txt", EntryKind.FILE, 4096, 1_700_100_000)
+    folder = FileEntry("d", "d", EntryKind.DIR, 0, 1_700_000_000)
+    assert side_info(None) == "-"
+    assert side_info(folder).startswith("<dir>")
+    assert side_info(older).startswith("2.0 KB  20")
+    left_newer = DiffEntry("a.txt", "a.txt", DiffStatus.MODIFIED, newer, older)
+    right_newer = DiffEntry("a.txt", "a.txt", DiffStatus.MODIFIED, older, newer)
+    only_left = DiffEntry("a.txt", "a.txt", DiffStatus.LEFT_ONLY, older, None)
+    assert status_text(left_newer) == "! modified (left newer)"
+    assert status_text(right_newer) == "! modified (right newer)"
+    assert status_text(only_left) == "< only left"
+
+
+@pytest.mark.asyncio
+async def test_compare_table_shows_size_and_date_of_both_sides(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (right / "a.txt").write_text("hello world, longer")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        await pilot.pause()
+        table = app.screen.query_one("#compare-table")
+        assert [str(c.label) for c in table.columns.values()][-2:] == [
+            "Left (size, date)",
+            "Right (size, date)",
+        ]
+        row = table.get_row_at(0)
+        assert "5.0 B" in row[3]
+        assert "19.0 B" in row[4]
+
+
+@pytest.mark.asyncio
+async def test_compare_shows_spinner_while_scanning_and_esc_cancels(tmp_path, monkeypatch):
+    import threading
+    from commandertui import compare_screen
+
+    release = threading.Event()
+
+    def slow_compare(left, right, cancel_check=None):
+        while not release.is_set() and not (cancel_check and cancel_check()):
+            release.wait(0.02)
+        return []
+
+    monkeypatch.setattr(compare_screen, "compare", slow_compare)
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        await pilot.pause(0.3)
+        screen = app.screen
+        assert screen.__class__.__name__ == "CompareScreen" and screen.scanning
+        text = str(screen.query_one("#compare-summary").render())
+        assert "Comparing" in text and "Esc to cancel" in text
+        await pilot.press("m")  # actions are refused while scanning
+        await pilot.pause()
+        assert app.screen is screen
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_compare_spinner_stops_and_result_appears_when_done(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (right / "a.txt").write_text("different")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        for _ in range(50):
+            await pilot.pause(0.05)
+            if not app.screen.scanning:
+                break
+        assert not app.screen.scanning
+        assert "1 differences" in str(app.screen.query_one("#compare-summary").render())

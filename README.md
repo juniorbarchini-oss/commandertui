@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.2.0** — 111/111 tests passing. MIT licensed.
+Status: **v1.2.0** — 115/115 tests passing. MIT licensed.
 
 ---
 
@@ -120,7 +120,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
 | `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one |
-| `c` | Compare: full recursive diff between the two panes' current folders |
+| `c` | Compare: full recursive diff between the two panes' current folders, with size and date of both sides (and which is newer when a file changed) |
 | `r` | Refresh both panes |
 | `q` | Quit |
 
