@@ -225,7 +225,8 @@ async def test_function_bar_click_runs_the_action(tmp_path):
     async with app.run_test(size=(130, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.press("down", "space")
-        await pilot.click("#fn-1")  # F5 Copy
+        copy_button = next(b for b in app.screen.query("FnButton") if b.action_name == "copy")
+        await pilot.click(f"#{copy_button.id}")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmScreen)
 
@@ -239,3 +240,41 @@ async def test_copy_with_nothing_selected_says_so(tmp_path):
         await pilot.pause()
         assert not isinstance(app.screen, ConfirmScreen)
         assert any("Nothing selected" in n.message for n in app._notifications)
+
+
+async def _rename_via_dialog(app, pilot, new_name):
+    await _skip_boot(pilot)
+    await pilot.press("down", "f2")  # row 0 is ".."; a.txt is next
+    await pilot.pause()
+    field = app.screen.query_one("#input-field")
+    assert field.value == "a.txt"  # current name preloaded
+    field.value = new_name
+    await pilot.press("enter")
+    await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_rename_with_f2(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _rename_via_dialog(app, pilot, "b.txt")
+        assert (left / "b.txt").read_text() == "hello" and not (left / "a.txt").exists()
+        assert app._panel("left").selected_name() == "b.txt"  # cursor follows
+
+
+@pytest.mark.asyncio
+async def test_rename_never_overwrites_existing(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "b.txt").write_text("other")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _rename_via_dialog(app, pilot, "b.txt")
+        assert (left / "a.txt").read_text() == "hello"
+        assert (left / "b.txt").read_text() == "other"
+
+
+@pytest.mark.asyncio
+async def test_rename_rejects_path_separators(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _rename_via_dialog(app, pilot, "../evil")
+        assert (left / "a.txt").exists() and not (tmp_path / "evil").exists()

@@ -174,14 +174,15 @@ class InputScreen(ModalScreen[str | None]):
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
 
-    def __init__(self, prompt: str) -> None:
+    def __init__(self, prompt: str, initial: str = "") -> None:
         super().__init__()
         self.prompt = prompt
+        self.initial = initial
 
     def compose(self) -> ComposeResult:
         with Vertical(id="input-box"):
             yield Static(self.prompt)
-            yield Input(id="input-field")
+            yield Input(value=self.initial, id="input-field")
         yield Footer()
 
     def on_mount(self) -> None:

@@ -85,6 +85,13 @@ class FilePanel(Vertical):
         bar = self.query_one(f"#{self.side}-pathbar", Static)
         bar.update(self.path)
 
+    def move_cursor_to(self, name: str) -> None:
+        """Put the cursor on `name` (e.g. after a rename); no-op if absent."""
+        for index, (row_name, _) in enumerate(self._rows):
+            if row_name == name:
+                self.query_one(f"#{self.side}-table", DataTable).move_cursor(row=index)
+                return
+
     def selected_name(self) -> str | None:
         table = self.query_one(f"#{self.side}-table", DataTable)
         if table.row_count == 0:
@@ -145,6 +152,7 @@ class FunctionBar(Horizontal):
 
     KEYS = [
         ("Tab", "Pane", "switch_pane"),
+        ("F2", "Rename", "rename"),
         ("F5", "Copy", "copy"),
         ("F6", "Move", "move"),
         ("F7", "MkDir", "make_dir"),
