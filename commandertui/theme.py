@@ -93,25 +93,25 @@ ConfirmScreen #confirm-box.danger {{
     border: heavy {p['danger']};
 }}
 
-ConfirmScreen Button {{
+ConfirmScreen Button, ProgressScreen Button {{
     background: {p['background']};
     color: {p['foreground']};
     border: tall {p['foreground']};
     text-style: none;
 }}
 
-ConfirmScreen Button.danger {{
+ConfirmScreen Button.danger, ProgressScreen Button.danger {{
     color: {p['danger']};
     border: tall {p['danger']};
 }}
 
-ConfirmScreen Button:focus {{
+ConfirmScreen Button:focus, ProgressScreen Button:focus {{
     background: {p['foreground']};
     color: {p['background']};
     text-style: bold;
 }}
 
-ConfirmScreen Button.danger:focus {{
+ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
     background: {p['danger']};
     color: {p['background']};
 }}

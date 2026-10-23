@@ -177,3 +177,31 @@ async def test_confirm_arrow_moves_between_buttons(tmp_path):
         await pilot.pause()
         await pilot.press("left")
         assert app.screen.focused.id == "yes"
+
+
+@pytest.mark.asyncio
+async def test_progress_cancel_button_asks_then_cancels(tmp_path):
+    from commandertui.progress_screen import ProgressScreen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _skip_boot(pilot)
+        screen = ProgressScreen("Copy", 1)
+        app.push_screen(screen)
+        await pilot.pause()
+        assert screen.query_one("#cancel").display and not screen.query_one("#yes-cancel").display
+
+        await pilot.click("#cancel")
+        await pilot.pause()
+        assert screen.asking and screen.query_one("#yes-cancel").display
+        assert screen.focused.id == "no-continue"  # safe default
+
+        await pilot.click("#no-continue")
+        await pilot.pause()
+        assert not screen.asking and not screen.cancel_requested and screen.query_one("#cancel").display
+
+        await pilot.click("#cancel")
+        await pilot.pause()
+        await pilot.click("#yes-cancel")
+        await pilot.pause()
+        assert screen.cancel_requested
