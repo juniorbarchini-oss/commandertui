@@ -348,13 +348,13 @@ async def test_compare_bar_back_button(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_main_bars_fit_in_110_columns(tmp_path):
+async def test_main_bars_fit_in_120_columns(tmp_path):
     app, left, right = await _open_confirm(tmp_path, "")
-    async with app.run_test(size=(110, 30)) as pilot:
+    async with app.run_test(size=(120, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        assert len(buttons) == 15
-        assert all(b.region.right <= 110 for b in buttons)
+        assert len(buttons) == 16
+        assert all(b.region.right <= 120 for b in buttons)
 
 
 @pytest.mark.asyncio
@@ -365,15 +365,15 @@ async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
         await pilot.pause()
         rows = {b.region.y for b in app.screen.query("FnButton")}
         assert len(rows) == 1  # everything on one line
-        await pilot.resize_terminal(110, 30)
+        await pilot.resize_terminal(120, 30)
         await pilot.pause()
         rows = {b.region.y for b in app.screen.query("FnButton")}
         assert len(rows) == 2  # tools above, F-keys below
-        assert all(b.region.right <= 110 for b in app.screen.query("FnButton"))
+        assert all(b.region.right <= 120 for b in app.screen.query("FnButton"))
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("width", [110, 130, 167, 168, 200, 250])
+@pytest.mark.parametrize("width", [120, 130, 167, 168, 200, 250])
 async def test_bars_never_overflow_at_any_width(tmp_path, width):
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(width, 30)) as pilot:
@@ -896,3 +896,57 @@ async def test_compare_spinner_stops_and_result_appears_when_done(tmp_path):
                 break
         assert not app.screen.scanning
         assert "1 differences" in str(app.screen.query_one("#compare-summary").render())
+
+
+@pytest.mark.asyncio
+async def test_default_theme_is_phosphor_green_and_t_button_opens_picker(tmp_path):
+    from commandertui.modals import ChoiceScreen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        assert app.theme == "phosphor-green"
+        await pilot.press("t")
+        await pilot.pause()
+        assert isinstance(app.screen, ChoiceScreen)
+
+
+@pytest.mark.asyncio
+async def test_picking_a_theme_applies_and_saves_it(tmp_path):
+    from commandertui import settings
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("t", "down", "down", "enter")  # green -> amber -> nord
+        await pilot.pause()
+        assert app.theme == "nord"
+    assert settings.load_theme() == "nord"
+
+
+@pytest.mark.asyncio
+async def test_escape_in_theme_picker_restores_the_previous_theme(tmp_path):
+    from commandertui import settings
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("t", "down", "down")
+        await pilot.pause()
+        assert app.theme == "nord"  # previewed live while moving
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.theme == "phosphor-green"
+    assert settings.load_theme() == "phosphor-green"  # the preview was not kept
+
+
+@pytest.mark.asyncio
+async def test_saved_theme_is_used_at_startup_and_unknown_one_is_ignored(tmp_path):
+    from commandertui import settings
+
+    from commandertui.app import CommanderApp
+
+    settings.save_theme("dracula")
+    assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "dracula"
+    settings.save_theme("no-such-theme")
+    assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "phosphor-green"

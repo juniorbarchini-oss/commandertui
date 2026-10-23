@@ -9,3 +9,11 @@ def no_real_update_check(monkeypatch, tmp_path):
     from commandertui import updater
 
     monkeypatch.setattr(updater, "CACHE_FILE", str(tmp_path / "update.json"))
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch, tmp_path):
+    """Tests must never read or write the user's real settings file."""
+    from commandertui import settings
+
+    monkeypatch.setattr(settings, "SETTINGS_FILE", str(tmp_path / "settings.json"))

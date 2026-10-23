@@ -326,6 +326,7 @@ class MainTopBar(ActionBar):
         ("p", "Places", "show_places"),
         ("r", "Refresh", "refresh_both"),
         ("h", "Hidden", "toggle_hidden"),
+        ("t", "Theme", "pick_theme"),
         ("i", "Size", "show_size"),
         ("q", "Quit", "app.quit"),
     ]
