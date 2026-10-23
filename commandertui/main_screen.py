@@ -9,7 +9,8 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from .modals import InputScreen, MessageScreen, PlacesScreen, SizeScreen
+from . import netlocations
+from .modals import ADD_NETWORK, ChoiceScreen, InputScreen, MessageScreen, PlacesScreen, SizeScreen
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
@@ -256,9 +257,92 @@ class MainScreen(Screen):
         def on_picked(path: str | None) -> None:
             if not path:
                 return
-            panel = self._active_panel()
-            panel.path = path
-            panel.marked.clear()
-            panel.refresh_listing()
+            if path == ADD_NETWORK:
+                self._add_network()
+            elif netlocations.is_uri(path):
+                self._connect(path)
+            else:
+                self._go_to(path)
 
         self.app.push_screen(PlacesScreen(), on_picked)
+
+    def _go_to(self, path: str) -> None:
+        panel = self._active_panel()
+        panel.path = path
+        panel.marked.clear()
+        panel.refresh_listing()
+
+    # ------------------------------------------------- network locations
+    def _add_network(self) -> None:
+        if not netlocations.gio_available():
+            self.app.push_screen(MessageScreen("Network locations need `gio` (GVFS) installed."))
+            return
+
+        def on_host(scheme: str, host: str | None) -> None:
+            if not host or not host.strip():
+                return
+            if scheme == "smb":
+                self._pick_share(host.strip())
+            else:
+                self._connect(netlocations.build_uri(scheme, host), save=True)
+
+        def on_scheme(choice: str | None) -> None:
+            if not choice:
+                return
+            scheme = choice.lower()
+            self.app.push_screen(
+                InputScreen(f"{choice} server (IP or name):"), lambda host: on_host(scheme, host)
+            )
+
+        self.app.push_screen(ChoiceScreen("Protocol", ["SMB", "SFTP", "FTP"]), on_scheme)
+
+    def _pick_share(self, host: str, retried: bool = False) -> None:
+        self.notify(f"Listing shares on {host}...")
+
+        def work() -> None:
+            shares, err = netlocations.list_shares(host)
+            self.app.call_from_thread(done, shares, err)
+
+        def done(shares: list[str] | None, err: str) -> None:
+            if shares is None:
+                if retried:
+                    self.app.push_screen(MessageScreen(f"Could not list shares on {host}.\n{err}"))
+                    return
+                # Most likely a login is needed: let gio ask for it on the real
+                # terminal (and offer to remember it in the keyring).
+                with self.app.suspend():
+                    netlocations.mount(netlocations.build_uri("smb", host), interactive=True)
+                self._pick_share(host, retried=True)
+                return
+            if not shares:
+                self.app.push_screen(MessageScreen(f"No shares found on {host}."))
+                return
+            self.app.push_screen(
+                ChoiceScreen(f"Shares on {host}", shares),
+                lambda share: share and self._connect(netlocations.build_uri("smb", host, share), save=True),
+            )
+
+        self.run_worker(work, thread=True)
+
+    def _connect(self, uri: str, save: bool = False, retried: bool = False) -> None:
+        self.notify(f"Connecting to {uri} ...")
+
+        def work() -> None:
+            ok, err = netlocations.mount(uri)
+            path = netlocations.local_path(uri) if ok else None
+            self.app.call_from_thread(done, path, err)
+
+        def done(path: str | None, err: str) -> None:
+            if path:
+                if save:
+                    netlocations.save_location(uri)
+                self._go_to(path)
+                return
+            if retried:
+                self.app.push_screen(MessageScreen(f"Could not connect to {uri}.\n{err}"))
+                return
+            with self.app.suspend():
+                netlocations.mount(uri, interactive=True)
+            self._connect(uri, save=save, retried=True)
+
+        self.run_worker(work, thread=True)
