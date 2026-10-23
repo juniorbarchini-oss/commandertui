@@ -353,7 +353,7 @@ async def test_main_bars_fit_in_100_columns(tmp_path):
     async with app.run_test(size=(100, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        assert len(buttons) == 12
+        assert len(buttons) == 13
         assert all(b.region.right <= 100 for b in buttons)
 
 
@@ -373,7 +373,7 @@ async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("width", [90, 120, 143, 144, 160, 250])
+@pytest.mark.parametrize("width", [100, 120, 155, 156, 180, 250])
 async def test_bars_never_overflow_at_any_width(tmp_path, width):
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(width, 30)) as pilot:
@@ -498,3 +498,77 @@ async def test_places_save_here_bookmarks_the_active_folder(tmp_path, monkeypatc
         assert isinstance(app.screen, PlacesScreen)
         assert any(p.label == "My left" and p.path == str(left) for p in bookmarks.load_saved())
     assert [p.label for p in bookmarks.load_saved()] == ["My left"]
+
+
+def _names(app, side="left"):
+    return [name for name, _ in app._panel(side)._rows]
+
+
+@pytest.mark.asyncio
+async def test_filter_narrows_live_and_enter_keeps_it(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "Windows11.iso").write_text("x")
+    (left / "notes.md").write_text("x")
+    async with app.run_test(size=(160, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        app.screen.query_one("#filter-field").value = "WIN"  # case-insensitive "contains"
+        await pilot.pause()
+        assert _names(app) == ["..", "Windows11.iso"]  # narrowed while the box is still open
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _names(app) == ["..", "Windows11.iso"]  # Enter keeps it
+        assert "filter: WIN" in str(app._panel("left").query_one("#left-pathbar").render())
+
+
+@pytest.mark.asyncio
+async def test_filter_escape_clears_it(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "other.txt").write_text("x")
+    async with app.run_test(size=(160, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        app.screen.query_one("#filter-field").value = "other"
+        await pilot.pause()
+        assert _names(app) == ["..", "other.txt"]
+        await pilot.press("escape")
+        await pilot.pause()
+        assert _names(app) == ["..", "a.txt", "other.txt"]
+
+
+@pytest.mark.asyncio
+async def test_filter_resets_when_entering_another_folder(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "sub").mkdir()
+    (left / "sub" / "inner.txt").write_text("x")
+    async with app.run_test(size=(160, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        app.screen.query_one("#filter-field").value = "sub"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("down", "enter")  # into sub/
+        await pilot.pause()
+        assert app._panel("left").filter_text == ""
+        assert _names(app) == ["..", "inner.txt"]
+
+
+@pytest.mark.asyncio
+async def test_filter_does_not_rescan_the_disk_while_typing(tmp_path, monkeypatch):
+    import os
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(160, 30)) as pilot:
+        await _skip_boot(pilot)
+        scans = []
+        real = os.scandir
+        monkeypatch.setattr(os, "scandir", lambda *a, **k: (scans.append(1), real(*a, **k))[1])
+        await pilot.press("slash")
+        await pilot.pause()
+        for text in ("a", "a.", "a.t"):
+            app.screen.query_one("#filter-field").value = text
+            await pilot.pause()
+        assert scans == []

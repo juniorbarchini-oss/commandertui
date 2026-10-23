@@ -10,7 +10,15 @@ from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
 from . import netlocations
-from .modals import ADD_NETWORK, ChoiceScreen, InputScreen, MessageScreen, PlacesScreen, SizeScreen
+from .modals import (
+    ADD_NETWORK,
+    ChoiceScreen,
+    FilterScreen,
+    InputScreen,
+    MessageScreen,
+    PlacesScreen,
+    SizeScreen,
+)
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
@@ -36,6 +44,7 @@ class MainScreen(Screen):
         Binding("enter", "enter_dir", "Open", priority=True),
         Binding("backspace", "up_dir", "Up", priority=True),
         Binding("space", "toggle_mark", "Mark", priority=True),
+        Binding("slash", "filter", "Filter", priority=True),
         Binding("f2", "rename", "Rename", priority=True),
         Binding("f5", "copy", "Copy", priority=True),
         Binding("f6", "move", "Move", priority=True),
@@ -160,6 +169,13 @@ class MainScreen(Screen):
         self.app.push_screen(InputScreen("New folder name:"), on_named)
 
     # --------------------------------------------------------- op queues
+    def action_filter(self) -> None:
+        panel = self._active_panel()
+        self.app.push_screen(
+            FilterScreen(panel.filter_text, panel.set_filter),
+            lambda text: panel.set_filter(text or ""),
+        )
+
     def action_rename(self) -> None:
         panel = self._active_panel()
         name = panel.selected_name()

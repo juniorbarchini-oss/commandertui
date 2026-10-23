@@ -61,6 +61,8 @@ class FilePanel(Vertical):
         self.path = os.path.abspath(start_path)
         self._rows: list[tuple[str, bool]] = []  # (name, is_dir), in display order
         self._sel_generation = 0  # lets a stale background size count be ignored
+        self.filter_text = ""
+        self._entries: list[tuple[str, str, bool, str, str]] = []
         self._spinner = None  # Timer animating the label while folders are counted
 
     def compose(self) -> ComposeResult:
@@ -81,10 +83,13 @@ class FilePanel(Vertical):
         self.set_class(active, "active-panel")
 
     def refresh_listing(self) -> None:
-        table = self.query_one(f"#{self.side}-table", DataTable)
-        table.clear()
-        self._rows = []
+        """Re-read the directory from disk, then draw it."""
+        self._scan()
+        self._draw_rows()
+        self.query_one(f"#{self.side}-free", Static).update(_free_space_label(self.path))
+        self.update_selection()
 
+    def _scan(self) -> None:
         entries: list[os.DirEntry] = []
         try:
             with os.scandir(self.path) as it:
@@ -95,26 +100,47 @@ class FilePanel(Vertical):
         except (PermissionError, FileNotFoundError):
             pass
 
-        if os.path.dirname(self.path) != self.path:
-            table.add_row("", PARENT_MARK, "", "", key=PARENT_MARK)
-            self._rows.append((PARENT_MARK, True))
-
+        self._entries = []  # (name, full path, is_dir, size text, mtime text)
         for entry in entries:
             try:
                 stat = entry.stat(follow_symlinks=False)
             except (PermissionError, FileNotFoundError):
                 continue
             is_dir = entry.is_dir(follow_symlinks=False)
-            mark = "*" if entry.path in self.marked else ""
             size = "<DIR>" if is_dir else _human_size(stat.st_size)
             mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-            display_name = f"{entry.name}/" if is_dir else entry.name
-            table.add_row(mark, display_name, size, mtime, key=entry.name)
-            self._rows.append((entry.name, is_dir))
+            self._entries.append((entry.name, entry.path, is_dir, size, mtime))
 
-        self.query_one(f"#{self.side}-pathbar", Static).update(self.path)
-        self.query_one(f"#{self.side}-free", Static).update(_free_space_label(self.path))
-        self.update_selection()
+    def _draw_rows(self) -> None:
+        """Draw the scanned entries through the current filter. No disk access,
+        so typing in the filter never re-reads a slow network share."""
+        table = self.query_one(f"#{self.side}-table", DataTable)
+        table.clear()
+        self._rows = []
+
+        if os.path.dirname(self.path) != self.path:
+            table.add_row("", PARENT_MARK, "", "", key=PARENT_MARK)
+            self._rows.append((PARENT_MARK, True))
+
+        needle = self.filter_text.lower()
+        for name, full, is_dir, size, mtime in self._entries:
+            if needle and needle not in name.lower():
+                continue
+            mark = "*" if full in self.marked else ""
+            table.add_row(mark, f"{name}/" if is_dir else name, size, mtime, key=name)
+            self._rows.append((name, is_dir))
+
+        shown = self.path + (f"   [filter: {self.filter_text}]" if self.filter_text else "")
+        self.query_one(f"#{self.side}-pathbar", Static).update(shown)
+
+    def set_filter(self, text: str) -> None:
+        """Show only entries whose name contains `text` (case-insensitive)."""
+        self.filter_text = text
+        self._draw_rows()
+
+    def watch_path(self, path: str) -> None:
+        # A filter belongs to the folder it was typed in.
+        self.filter_text = ""
 
     def _stop_spinner(self) -> None:
         if self._spinner is not None:
@@ -258,6 +284,7 @@ class MainTopBar(ActionBar):
     PREFIX = "tb"
     KEYS = [
         ("Tab", "Pane", "switch_pane"),
+        ("/", "Filter", "filter"),
         ("c", "Compare", "show_compare"),
         ("p", "Places", "show_places"),
         ("r", "Refresh", "refresh_both"),
