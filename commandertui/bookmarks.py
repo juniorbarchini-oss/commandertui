@@ -186,4 +186,7 @@ def remove_bookmark(path: str) -> None:
 
 def all_places() -> list[Place]:
     home = Place(label="Home", path=os.path.expanduser("~"), kind="home")
-    return [home] + detect_mounted() + detect_network_mounts() + detect_home_mounts() + load_saved()
+    from .netlocations import load_locations  # lazy: netlocations imports CONFIG_DIR from here
+
+    saved_net = [Place(label=loc.label, path=loc.uri, kind="net-saved") for loc in load_locations()]
+    return [home] + detect_mounted() + detect_network_mounts() + detect_home_mounts() + load_saved() + saved_net

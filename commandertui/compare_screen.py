@@ -4,13 +4,14 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Static
+from textual.widgets import DataTable, Static
 
 from .diff import compare
 from .modals import MessageScreen
 from .models import DiffStatus, OpKind, OpSide, OperationQueue, QueuedOp
 from .plan import plan_mirror, plan_two_way, plan_update
 from .run_queue import run_queue_with_progress
+from .widgets import CompareBar
 
 STATUS_LABEL = {
     DiffStatus.LEFT_ONLY: "< only left",
@@ -45,7 +46,7 @@ class CompareScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Static("", id="compare-summary")
         yield DataTable(id="compare-table", cursor_type="row")
-        yield Footer()
+        yield CompareBar()
 
     def on_mount(self) -> None:
         self.reload()
@@ -65,8 +66,7 @@ class CompareScreen(Screen):
         summary = self.query_one("#compare-summary", Static)
         summary.update(
             f"{self.left_root}  <->  {self.right_root}\n"
-            f"{non_identical} differences   "
-            "[m]irror  [u]pdate  [b]idirectional  [space] mark  [c]opy marked  [esc] back"
+            f"{non_identical} differences"
         )
 
     def action_back(self) -> None:

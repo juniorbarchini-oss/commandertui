@@ -31,6 +31,11 @@ Screen {{
     color: {p['foreground']};
 }}
 
+/* The filter bar floats over the panes so you watch the list shrink as you type. */
+FilterScreen {{
+    background: transparent;
+}}
+
 .dim {{
     color: {p['dim']};
 }}
@@ -82,13 +87,169 @@ DataTable > .datatable--even-row {{
     background: {p['background']};
 }}
 
+ConfirmScreen #confirm-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
+ConfirmScreen #confirm-box.danger {{
+    color: {p['danger']};
+    border: heavy {p['danger']};
+}}
+
+ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FilterScreen Button, UpdateScreen Button {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: tall {p['foreground']};
+    text-style: none;
+}}
+
+ConfirmScreen Button.danger, ProgressScreen Button.danger {{
+    color: {p['danger']};
+    border: tall {p['danger']};
+}}
+
+ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FilterScreen Button:focus, UpdateScreen Button:focus {{
+    background: {p['foreground']};
+    color: {p['background']};
+    text-style: bold;
+}}
+
+ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
+    background: {p['danger']};
+    color: {p['background']};
+}}
+
+MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box, FilterScreen #filter-box, UpdateScreen #update-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
+InputScreen #input-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
+InputScreen Input, FilterScreen Input {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: tall {p['dim']};
+}}
+
+InputScreen Input:focus, FilterScreen Input:focus {{
+    border: tall {p['foreground']};
+}}
+
+InputScreen Input > .input--cursor, FilterScreen Input > .input--cursor {{
+    background: {p['foreground']};
+    color: {p['background']};
+}}
+
+InputScreen Input > .input--selection, FilterScreen Input > .input--selection {{
+    background: {p['dim']};
+    color: {p['foreground']};
+}}
+
+ChoiceScreen OptionList {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: tall {p['dim']};
+}}
+
+ChoiceScreen OptionList:focus {{
+    border: tall {p['foreground']};
+}}
+
+ChoiceScreen OptionList > .option-list--option-highlighted {{
+    background: {p['foreground']};
+    color: {p['background']};
+    text-style: bold;
+}}
+
+FilePanel {{
+    border: round {p['dim']};
+}}
+
+FilePanel.active-panel {{
+    border: heavy {p['foreground']};
+}}
+
+DataTable:blur > .datatable--cursor {{
+    background: {p['dim']};
+    color: {p['background']};
+}}
+
+CompareBar {{
+    dock: bottom;
+}}
+
+#bars {{
+    height: auto;
+}}
+
+#bars.wide {{
+    layout: horizontal;
+    height: 3;
+}}
+
+#bars.narrow {{
+    layout: vertical;
+    height: 6;
+}}
+
+#bars.wide MainTopBar, #bars.wide FunctionBar {{
+    width: auto;
+}}
+
+#bars.narrow MainTopBar, #bars.narrow FunctionBar {{
+    width: 100%;
+}}
+
+MainTopBar, FunctionBar, CompareBar {{
+    height: 3;
+    background: {p['background']};
+}}
+
+FnButton {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: round {p['foreground']};
+    min-width: 0;
+    width: auto;
+    padding: 0;
+    margin: 0;
+    text-style: none;
+}}
+
+FnButton:hover {{
+    background: {p['foreground']};
+    color: {p['background']};
+}}
+
+.pathrow {{
+    height: 1;
+}}
+
+.pathrow .pathbar {{
+    width: 1fr;
+}}
+
+.pathrow .pathfree, .pathrow .pathsel {{
+    width: auto;
+    padding: 0 2;
+}}
+
 .pathbar {{
     color: {p['dim']};
     padding: 0 1;
 }}
 
 .pathbar.active {{
-    color: {p['accent']};
+    background: {p['foreground']};
+    color: {p['background']};
     text-style: bold;
 }}
 """

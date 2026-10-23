@@ -4,9 +4,9 @@ import time
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Footer, ProgressBar, Static
+from textual.widgets import Button, ProgressBar, Static
 
 from .executor import TransferStatus
 
@@ -56,12 +56,22 @@ class ProgressScreen(ModalScreen[None]):
     #progress-title, #progress-rate {
         margin-bottom: 1;
     }
+    #progress-buttons {
+        height: 3;
+        align: center middle;
+    }
+    #progress-buttons Button {
+        min-width: 22;
+        margin: 0 2;
+    }
     """
 
     BINDINGS = [
         Binding("escape", "ask_cancel", "Cancel", priority=True),
         Binding("y", "confirm_cancel", "Yes, cancel", priority=True),
         Binding("n", "resume", "No, continue", priority=True),
+        Binding("left", "app.focus_previous", "Previous", show=False, priority=True),
+        Binding("right", "app.focus_next", "Next", show=False, priority=True),
     ]
 
     def __init__(self, title: str, total_ops: int) -> None:
@@ -80,7 +90,29 @@ class ProgressScreen(ModalScreen[None]):
             yield Static("", id="total-label")
             yield ProgressBar(total=100, id="total-bar", show_eta=False)
             yield Static("", id="progress-rate")
-        yield Footer()
+            with Horizontal(id="progress-buttons"):
+                yield Button("Cancel  (Esc)", id="cancel")
+                yield Button("Yes, cancel  (y)", id="yes-cancel", classes="danger")
+                yield Button("No, continue  (n)", id="no-continue")
+
+    def on_mount(self) -> None:
+        self._show_buttons()
+
+    def _show_buttons(self) -> None:
+        """One button row, three states: Cancel / the are-you-sure pair / none
+        once a cancel is under way."""
+        busy = self.cancel_requested
+        self.query_one("#cancel", Button).display = not self.asking and not busy
+        self.query_one("#yes-cancel", Button).display = self.asking
+        self.query_one("#no-continue", Button).display = self.asking
+        if busy:
+            return
+        self.query_one("#no-continue" if self.asking else "#cancel", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        {"cancel": self.action_ask_cancel, "yes-cancel": self.action_confirm_cancel}.get(
+            event.button.id, self.action_resume
+        )()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("confirm_cancel", "resume"):
@@ -92,6 +124,7 @@ class ProgressScreen(ModalScreen[None]):
     def action_ask_cancel(self) -> None:
         self.asking = True
         self.refresh_bindings()
+        self._show_buttons()
         self.query_one("#progress-rate", Static).update(
             "Cancel? The file being copied is discarded; finished files stay."
         )
@@ -100,11 +133,13 @@ class ProgressScreen(ModalScreen[None]):
         self.asking = False
         self.cancel_requested = True
         self.refresh_bindings()
+        self._show_buttons()
         self.query_one("#progress-rate", Static).update("Cancelling...")
 
     def action_resume(self) -> None:
         self.asking = False
         self.refresh_bindings()
+        self._show_buttons()
 
     def report(self, s: TransferStatus) -> None:
         """Called via app.call_from_thread from the worker -- safe to touch widgets."""

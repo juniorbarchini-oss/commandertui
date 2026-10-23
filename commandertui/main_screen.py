@@ -6,14 +6,24 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header
+from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from .modals import InputScreen, MessageScreen, PlacesScreen, SizeScreen
+from . import netlocations, updater
+from .modals import (
+    ADD_NETWORK,
+    ChoiceScreen,
+    FilterScreen,
+    InputScreen,
+    MessageScreen,
+    PlacesScreen,
+    SizeScreen,
+    UpdateScreen,
+)
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
-from .widgets import FilePanel
+from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
 
 
 class MainScreen(Screen):
@@ -35,6 +45,12 @@ class MainScreen(Screen):
         Binding("enter", "enter_dir", "Open", priority=True),
         Binding("backspace", "up_dir", "Up", priority=True),
         Binding("space", "toggle_mark", "Mark", priority=True),
+        Binding("u", "update_app", "Update", priority=True),
+        Binding("slash", "filter", "Filter", priority=True),
+        Binding("plus", "mark_pattern", "Mark pattern", priority=True),
+        Binding("minus", "unmark_pattern", "Unmark pattern", priority=True),
+        Binding("asterisk", "invert_marks", "Invert marks", priority=True),
+        Binding("f2", "rename", "Rename", priority=True),
         Binding("f5", "copy", "Copy", priority=True),
         Binding("f6", "move", "Move", priority=True),
         Binding("f7", "make_dir", "MkDir", priority=True),
@@ -62,10 +78,30 @@ class MainScreen(Screen):
         with Horizontal():
             yield FilePanel(self.left_path, side="left", id="panel-left")
             yield FilePanel(self.right_path, side="right", id="panel-right")
-        yield Footer()
+        with Horizontal(id="bars"):
+            yield MainTopBar()
+            yield FunctionBar()
 
     def on_mount(self) -> None:
         self._set_active("left")
+        self._layout_bars()
+
+    def on_resize(self, event) -> None:
+        self._layout_bars()
+
+    def on_screen_resume(self) -> None:
+        # First time the main screen shows (the boot animation just closed):
+        # tell the user about an update the background check already found.
+        self.prompt_update()
+
+    def _layout_bars(self) -> None:
+        """One row of key boxes when the window is wide enough, two stacked
+        rows (tools above, F-keys below) when it is not."""
+        needed = MainTopBar.needed_width() + FunctionBar.needed_width() + 2
+        wide = self.size.width >= needed
+        bars = self.query_one("#bars")
+        bars.set_class(wide, "wide")
+        bars.set_class(not wide, "narrow")
 
     # ------------------------------------------------------------ helpers
     def _panel(self, side: str) -> FilePanel:
@@ -73,6 +109,9 @@ class MainScreen(Screen):
 
     def _active_panel(self) -> FilePanel:
         return self._panel(self.active_side)
+
+    def _nothing_selected(self) -> None:
+        self.notify("Nothing selected in this pane. Press Tab to switch panes.", severity="warning")
 
     def _other_panel(self) -> FilePanel:
         return self._panel("right" if self.active_side == "left" else "left")
@@ -140,6 +179,114 @@ class MainScreen(Screen):
         self.app.push_screen(InputScreen("New folder name:"), on_named)
 
     # --------------------------------------------------------- op queues
+    SELECT_MENU = ["Mark by pattern  (+)", "Unmark by pattern  (-)", "Invert marks  (*)"]
+
+    def action_select_menu(self) -> None:
+        def on_choice(choice: str | None) -> None:
+            if choice == self.SELECT_MENU[0]:
+                self.action_mark_pattern()
+            elif choice == self.SELECT_MENU[1]:
+                self.action_unmark_pattern()
+            elif choice == self.SELECT_MENU[2]:
+                self.action_invert_marks()
+
+        self.app.push_screen(ChoiceScreen("Select", self.SELECT_MENU), on_choice)
+
+    def action_mark_pattern(self) -> None:
+        panel = self._active_panel()
+
+        def on_pattern(pattern: str | None) -> None:
+            if pattern:
+                count = panel.mark_matching(pattern)
+                self.notify(f"Marked {count} item(s)." if count else "Nothing matches.")
+
+        self.app.push_screen(InputScreen("Mark items matching (e.g. *.iso, or plain text):"), on_pattern)
+
+    def action_unmark_pattern(self) -> None:
+        panel = self._active_panel()
+
+        def on_pattern(pattern: str | None) -> None:
+            if pattern:
+                count = panel.unmark_matching(pattern)
+                self.notify(f"Unmarked {count} item(s)." if count else "No marked item matches.")
+
+        self.app.push_screen(InputScreen("Unmark items matching (e.g. *.iso, or plain text):"), on_pattern)
+
+    def action_invert_marks(self) -> None:
+        self._active_panel().invert_marks()
+
+    # ------------------------------------------------------------ updates
+    def action_update_app(self) -> None:
+        if self.app.update_info is None:
+            self.notify("CommanderTUI is up to date.")
+            return
+        self.app.update_prompted = False
+        self.prompt_update()
+
+    def prompt_update(self) -> None:
+        info = self.app.update_info
+        if info is None or self.app.update_prompted:
+            return
+        self.app.update_prompted = True
+
+        def on_choice(choice: str | None) -> None:
+            if choice == "skip":
+                updater.skip_version(info.latest)
+                self.app.clear_update()
+            elif choice == "now":
+                with self.app.suspend():
+                    ok = updater.run_update(info)
+                if ok:
+                    self.app.clear_update()
+                    self.app.push_screen(
+                        MessageScreen(f"Updated to {info.latest}.\nQuit and reopen CommanderTUI to use it.")
+                    )
+                else:
+                    self.app.push_screen(
+                        MessageScreen("The update did not finish. Check the terminal output, then try again.")
+                    )
+
+        self.app.push_screen(UpdateScreen(info), on_choice)
+
+    def action_filter(self) -> None:
+        panel = self._active_panel()
+        self.app.push_screen(
+            FilterScreen(panel.filter_text, panel.set_filter),
+            lambda text: panel.set_filter(text or ""),
+        )
+
+    def action_rename(self) -> None:
+        panel = self._active_panel()
+        name = panel.selected_name()
+        if not name or name == PARENT_MARK:
+            self._nothing_selected()
+            return
+
+        def on_named(new_name: str | None) -> None:
+            if not new_name or new_name == name:
+                return
+            if "/" in new_name or new_name in (".", ".."):
+                self.app.push_screen(MessageScreen(f'"{new_name}" is not a valid name.'))
+                return
+            src = os.path.join(panel.path, name)
+            dst = os.path.join(panel.path, new_name)
+            # os.rename (not os.replace): never silently overwrite another item.
+            if os.path.lexists(dst):
+                self.app.push_screen(MessageScreen(f'"{new_name}" already exists here.'))
+                return
+            try:
+                os.rename(src, dst)
+            except OSError as e:
+                self.app.push_screen(MessageScreen(f"Could not rename:\n{e}"))
+                return
+            if src in panel.marked:
+                panel.marked.discard(src)
+                panel.marked.add(dst)
+            panel.refresh_listing()
+            panel.move_cursor_to(new_name)
+
+        self.app.push_screen(InputScreen("Rename to:", initial=name), on_named)
+
     def action_copy(self) -> None:
         self._run_marked_op(OpKind.COPY, "Copy")
 
@@ -150,6 +297,7 @@ class MainScreen(Screen):
         src_panel = self._active_panel()
         items = src_panel.marked_or_selected()
         if not items:
+            self._nothing_selected()
             return
 
         side = OpSide.LEFT if src_panel.side == "left" else OpSide.RIGHT
@@ -171,6 +319,7 @@ class MainScreen(Screen):
         dst_panel = self._other_panel()
         items = src_panel.marked_or_selected()
         if not items:
+            self._nothing_selected()
             return
 
         side = OpSide.LEFT_TO_RIGHT if src_panel.side == "left" else OpSide.RIGHT_TO_LEFT
@@ -203,9 +352,92 @@ class MainScreen(Screen):
         def on_picked(path: str | None) -> None:
             if not path:
                 return
-            panel = self._active_panel()
-            panel.path = path
-            panel.marked.clear()
-            panel.refresh_listing()
+            if path == ADD_NETWORK:
+                self._add_network()
+            elif netlocations.is_uri(path):
+                self._connect(path)
+            else:
+                self._go_to(path)
 
-        self.app.push_screen(PlacesScreen(), on_picked)
+        self.app.push_screen(PlacesScreen(self._active_panel().path), on_picked)
+
+    def _go_to(self, path: str) -> None:
+        panel = self._active_panel()
+        panel.path = path
+        panel.marked.clear()
+        panel.refresh_listing()
+
+    # ------------------------------------------------- network locations
+    def _add_network(self) -> None:
+        if not netlocations.gio_available():
+            self.app.push_screen(MessageScreen("Network locations need `gio` (GVFS) installed."))
+            return
+
+        def on_host(scheme: str, host: str | None) -> None:
+            if not host or not host.strip():
+                return
+            if scheme == "smb":
+                self._pick_share(host.strip())
+            else:
+                self._connect(netlocations.build_uri(scheme, host), save=True)
+
+        def on_scheme(choice: str | None) -> None:
+            if not choice:
+                return
+            scheme = choice.lower()
+            self.app.push_screen(
+                InputScreen(f"{choice} server (IP or name):"), lambda host: on_host(scheme, host)
+            )
+
+        self.app.push_screen(ChoiceScreen("Protocol", ["SMB", "SFTP", "FTP"]), on_scheme)
+
+    def _pick_share(self, host: str, retried: bool = False) -> None:
+        self.notify(f"Listing shares on {host}...")
+
+        def work() -> None:
+            shares, err = netlocations.list_shares(host)
+            self.app.call_from_thread(done, shares, err)
+
+        def done(shares: list[str] | None, err: str) -> None:
+            if shares is None:
+                if retried:
+                    self.app.push_screen(MessageScreen(f"Could not list shares on {host}.\n{err}"))
+                    return
+                # Most likely a login is needed: let gio ask for it on the real
+                # terminal (and offer to remember it in the keyring).
+                with self.app.suspend():
+                    netlocations.mount(netlocations.build_uri("smb", host), interactive=True)
+                self._pick_share(host, retried=True)
+                return
+            if not shares:
+                self.app.push_screen(MessageScreen(f"No shares found on {host}."))
+                return
+            self.app.push_screen(
+                ChoiceScreen(f"Shares on {host}", shares),
+                lambda share: share and self._connect(netlocations.build_uri("smb", host, share), save=True),
+            )
+
+        self.run_worker(work, thread=True)
+
+    def _connect(self, uri: str, save: bool = False, retried: bool = False) -> None:
+        self.notify(f"Connecting to {uri} ...")
+
+        def work() -> None:
+            ok, err = netlocations.mount(uri)
+            path = netlocations.local_path(uri) if ok else None
+            self.app.call_from_thread(done, path, err)
+
+        def done(path: str | None, err: str) -> None:
+            if path:
+                if save:
+                    netlocations.save_location(uri)
+                self._go_to(path)
+                return
+            if retried:
+                self.app.push_screen(MessageScreen(f"Could not connect to {uri}.\n{err}"))
+                return
+            with self.app.suspend():
+                netlocations.mount(uri, interactive=True)
+            self._connect(uri, save=save, retried=True)
+
+        self.run_worker(work, thread=True)

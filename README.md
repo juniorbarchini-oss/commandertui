@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.1.0** — 43/43 tests passing. MIT licensed.
+Status: **v1.2.0** — 108/108 tests passing. MIT licensed.
 
 ---
 
@@ -14,7 +14,7 @@ A safe, simple alternative to heavier dual-pane file managers. It was
 written after an earlier attempt of the same idea had to be scrapped for
 running an unauthenticated local HTTP server. This project deliberately:
 
-- **Never opens a network port.** Pure terminal UI (Textual), no HTTP server,
+- **Never opens a network port.** Pure terminal UI (Textual), no HTTP server (the only outgoing request is the daily update check, which you can turn off),
   no webview.
 - **Never does a raw `rm -rf`.** Deletes always go through the desktop trash
   (`send2trash` → `gio trash` → manual move into `~/.local/share/Trash`, in
@@ -108,13 +108,17 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `↑`/`↓`, `Enter` | Navigate, open directory |
 | `Backspace` | Go to parent directory |
 | `Space` | Mark/unmark item under cursor |
+| `F2` | Rename the item under the cursor (never overwrites an existing name) |
 | `F5` | Copy marked (or item under cursor) to the other pane |
 | `F6` | Move marked to the other pane |
 | `F7` | Create a folder in the active pane |
 | `F8` / `Delete` | Delete marked (to trash) |
+| `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
+| `+` / `-` / `*` | Mark / unmark by pattern (`*.iso`, or plain text = contains) / invert marks, over the rows shown |
+| `u` | Update: shows the pending new version (see *Updates*) |
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
-| `p` | Places: jump to a mounted drive (USB/SMB/rclone) or saved bookmark |
+| `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one |
 | `c` | Compare: full recursive diff between the two panes' current folders |
 | `r` | Refresh both panes |
 | `q` | Quit |
@@ -128,6 +132,41 @@ half-written), and a move never removes a source it didn't fully copy.
 (`/run/media`, `/media`, `/mnt` — checked with `ismount`, so an empty
 on-demand mount point doesn't show), GVFS/Nautilus network shares, FUSE
 mounts inside `$HOME` (e.g. `rclone mount`), and saved bookmarks.
+
+**Network locations (Linux, needs `gio`/GVFS):** in Places press `a`, pick
+SMB, SFTP or FTP and type the server's IP or name. For SMB the app lists the
+shares on the server and you pick one; SFTP/FTP connect straight in. The
+location is saved in `~/.config/commandertui/network.json` (protocol, host
+and share only -- never a password) and reappears in Places, mounting itself
+when picked. If the server asks for a login, `gio` asks for it in the
+terminal and can remember it in the system keyring, exactly like Nautilus.
+
+Every key also has a clickable box on the bottom bar: one row on wide windows
+(168+ columns), two rows when narrower (110 columns is the practical minimum).
+The active pane has the thick border and the inverted path bar; each path bar
+shows the free space of that disk, and the marked count and total size.
+
+## Updates
+
+Once a day, in the background and only after the start-up animation, the app
+asks PyPI for the latest version (a plain GET, nothing about you is sent). If
+a newer one exists you get a dialog -- **Update now / Later / Skip this
+version** -- and the header keeps saying `update X available (press u)`.
+It never installs on its own. **Update now** hands the terminal over and runs
+the command that matches how it was installed:
+
+| Installed as | Update runs |
+|---|---|
+| Arch package (`makepkg`) | rebuilds from the release's PKGBUILD with `makepkg -si` (your sudo password is typed in the terminal, never read by the app) |
+| pipx | `pipx upgrade commandertui` |
+| pip | `pip install --upgrade commandertui` |
+| git checkout | no button: the dialog tells you to `git pull` |
+
+Turn the check off with `commandertui --no-update-check` or by setting
+`COMMANDERTUI_NO_UPDATE_CHECK=1`. `COMMANDERTUI_FAKE_LATEST=9.9.9` shows the
+dialog without a real release, to see how it looks. The logic lives in one
+self-contained file, `commandertui/updater.py`, written to be copied into
+other apps.
 
 Inside **Compare**:
 
@@ -155,6 +194,7 @@ commandertui/
 ├── trash.py               # 3-layer safe delete (send2trash / gio trash / manual)
 ├── executor.py             # runs an OperationQueue against the filesystem
 ├── bookmarks.py             # detected mounts (USB/SMB/rclone) + saved places
+├── netlocations.py           # SMB/SFTP/FTP locations via gio (list shares, mount, save)
 ├── theme.py                  # green/amber phosphor palettes
 ├── boot.py                    # startup "modem" reveal animation
 ├── widgets.py                  # FilePanel: one pane's directory listing
