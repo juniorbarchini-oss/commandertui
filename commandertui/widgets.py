@@ -337,6 +337,7 @@ class FunctionBar(ActionBar):
     PREFIX = "fb"
     KEYS = [
         ("F2", "Rename", "rename"),
+        ("F4", "Edit", "edit"),
         ("F5", "Copy", "copy"),
         ("F6", "Move", "move"),
         ("F7", "MkDir", "make_dir"),
