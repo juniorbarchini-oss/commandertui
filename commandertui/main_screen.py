@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -9,7 +10,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from . import netlocations, updater
+from . import editor, netlocations, theme, updater
 from .modals import (
     ADD_NETWORK,
     ChoiceScreen,
@@ -45,12 +46,14 @@ class MainScreen(Screen):
         Binding("enter", "enter_dir", "Open", priority=True),
         Binding("backspace", "up_dir", "Up", priority=True),
         Binding("space", "toggle_mark", "Mark", priority=True),
+        Binding("t", "pick_theme", "Theme", priority=True),
         Binding("u", "update_app", "Update", priority=True),
         Binding("slash", "filter", "Filter", priority=True),
         Binding("plus", "mark_pattern", "Mark pattern", priority=True),
         Binding("minus", "unmark_pattern", "Unmark pattern", priority=True),
         Binding("asterisk", "invert_marks", "Invert marks", priority=True),
         Binding("f2", "rename", "Rename", priority=True),
+        Binding("f4", "edit", "Edit", priority=True),
         Binding("f5", "copy", "Copy", priority=True),
         Binding("f6", "move", "Move", priority=True),
         Binding("f7", "make_dir", "MkDir", priority=True),
@@ -248,6 +251,25 @@ class MainScreen(Screen):
 
         self.app.push_screen(UpdateScreen(info), on_choice)
 
+    def action_pick_theme(self) -> None:
+        labels = [label for label, _ in theme.THEME_CHOICES]
+        names = [name for _, name in theme.THEME_CHOICES]
+        original = self.app.theme
+        initial = names.index(original) if original in names else 0
+
+        def on_choice(choice: str | None) -> None:
+            if choice is None:
+                self.app.preview_theme(original)  # Esc: back to what it was
+            else:
+                self.app.theme = names[labels.index(choice)]  # saved by the app
+
+        self.app.push_screen(
+            ChoiceScreen(
+                "Color theme", labels, initial=initial, on_highlight=lambda i: self.app.preview_theme(names[i])
+            ),
+            on_choice,
+        )
+
     def action_filter(self) -> None:
         panel = self._active_panel()
         self.app.push_screen(
@@ -286,6 +308,34 @@ class MainScreen(Screen):
             panel.move_cursor_to(new_name)
 
         self.app.push_screen(InputScreen("Rename to:", initial=name), on_named)
+
+    def action_edit(self) -> None:
+        panel = self._active_panel()
+        name = panel.selected_name()
+        if not name or name == PARENT_MARK:
+            self._nothing_selected()
+            return
+        path = os.path.join(panel.path, name)
+        if os.path.isdir(path):
+            self.app.push_screen(MessageScreen(f'"{name}" is a folder. Pick a file to edit.'))
+            return
+        command = editor.editor_command()
+        if command is None:
+            self.app.push_screen(
+                MessageScreen("No text editor found.\nSet $EDITOR or install nano.")
+            )
+            return
+        with self.app.suspend():
+            try:
+                subprocess.run([*command, path])
+            except OSError as e:
+                error = str(e)
+            else:
+                error = ""
+        if error:
+            self.app.push_screen(MessageScreen(f"Could not start the editor:\n{error}"))
+        panel.refresh_listing()
+        panel.move_cursor_to(name)
 
     def action_copy(self) -> None:
         self._run_marked_op(OpKind.COPY, "Copy")

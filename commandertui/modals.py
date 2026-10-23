@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import os
 import time
 
@@ -466,10 +468,26 @@ class ChoiceScreen(ModalScreen[str | None]):
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
 
-    def __init__(self, prompt: str, options: list[str]) -> None:
+    def __init__(
+        self,
+        prompt: str,
+        options: list[str],
+        initial: int | None = None,
+        on_highlight: Callable[[int], None] | None = None,
+    ) -> None:
         super().__init__()
         self.prompt = prompt
         self.options = options
+        self.initial = initial
+        self.on_highlight = on_highlight  # lets a picker preview each item as you move
+
+    def on_mount(self) -> None:
+        if self.initial is not None:
+            self.query_one("#choice-list", OptionList).highlighted = self.initial
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        if self.on_highlight is not None:
+            self.on_highlight(event.option_index)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="choice-box"):

@@ -1,7 +1,7 @@
 import pytest
 
 from commandertui.app import CommanderApp
-from commandertui.modals import ConfirmScreen
+from commandertui.modals import ConfirmScreen, MessageScreen
 
 
 async def _skip_boot(pilot):
@@ -348,13 +348,13 @@ async def test_compare_bar_back_button(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_main_bars_fit_in_110_columns(tmp_path):
+async def test_main_bars_fit_in_120_columns(tmp_path):
     app, left, right = await _open_confirm(tmp_path, "")
-    async with app.run_test(size=(110, 30)) as pilot:
+    async with app.run_test(size=(120, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        assert len(buttons) == 14
-        assert all(b.region.right <= 110 for b in buttons)
+        assert len(buttons) == 16
+        assert all(b.region.right <= 120 for b in buttons)
 
 
 @pytest.mark.asyncio
@@ -365,15 +365,15 @@ async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
         await pilot.pause()
         rows = {b.region.y for b in app.screen.query("FnButton")}
         assert len(rows) == 1  # everything on one line
-        await pilot.resize_terminal(110, 30)
+        await pilot.resize_terminal(120, 30)
         await pilot.pause()
         rows = {b.region.y for b in app.screen.query("FnButton")}
         assert len(rows) == 2  # tools above, F-keys below
-        assert all(b.region.right <= 110 for b in app.screen.query("FnButton"))
+        assert all(b.region.right <= 120 for b in app.screen.query("FnButton"))
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("width", [110, 130, 167, 168, 200, 250])
+@pytest.mark.parametrize("width", [120, 130, 167, 168, 200, 250])
 async def test_bars_never_overflow_at_any_width(tmp_path, width):
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(width, 30)) as pilot:
@@ -759,3 +759,194 @@ async def test_u_says_up_to_date_when_nothing_is_pending(tmp_path):
         await pilot.press("u")
         await pilot.pause()
         assert any("up to date" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_f4_opens_the_editor_on_the_selected_file(tmp_path, monkeypatch):
+    import contextlib
+    from commandertui import main_screen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    calls = []
+    monkeypatch.setattr(main_screen.editor, "editor_command", lambda: ["myeditor", "-x"])
+    monkeypatch.setattr(main_screen.subprocess, "run", lambda cmd: calls.append(cmd))
+    app.suspend = contextlib.nullcontext  # headless tests have no real terminal to hand over
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("down", "f4")  # row 0 is ".."; a.txt is next
+        await pilot.pause()
+    assert calls == [["myeditor", "-x", str(left / "a.txt")]]
+
+
+@pytest.mark.asyncio
+async def test_f4_on_a_folder_or_parent_does_not_start_the_editor(tmp_path, monkeypatch):
+    import contextlib
+    from commandertui import main_screen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "sub").mkdir()
+    calls = []
+    monkeypatch.setattr(main_screen.editor, "editor_command", lambda: ["myeditor"])
+    monkeypatch.setattr(main_screen.subprocess, "run", lambda cmd: calls.append(cmd))
+    app.suspend = contextlib.nullcontext
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("f4")  # on ".."
+        await pilot.pause()
+        await pilot.press("down", "f4")  # folders sort first: "sub"
+        await pilot.pause()
+        assert isinstance(app.screen, MessageScreen)  # tells the user it is a folder
+    assert calls == []
+
+
+def test_editor_command_prefers_visual_then_editor_then_fallback(monkeypatch):
+    from commandertui import editor
+
+    monkeypatch.setattr(editor.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setenv("VISUAL", "code -w")
+    monkeypatch.setenv("EDITOR", "nano")
+    assert editor.editor_command() == ["code", "-w"]
+    monkeypatch.delenv("VISUAL")
+    assert editor.editor_command() == ["nano"]
+    monkeypatch.delenv("EDITOR")
+    assert editor.editor_command() == ["nano"]  # first fallback
+    monkeypatch.setattr(editor.shutil, "which", lambda name: None)
+    assert editor.editor_command() is None
+    monkeypatch.setenv("EDITOR", "does-not-exist")
+    assert editor.editor_command() is None
+
+
+def test_compare_side_info_and_status_text():
+    from commandertui.compare_screen import side_info, status_text
+    from commandertui.models import DiffEntry, DiffStatus, EntryKind, FileEntry
+
+    older = FileEntry("a.txt", "a.txt", EntryKind.FILE, 2048, 1_700_000_000)
+    newer = FileEntry("a.txt", "a.txt", EntryKind.FILE, 4096, 1_700_100_000)
+    folder = FileEntry("d", "d", EntryKind.DIR, 0, 1_700_000_000)
+    assert side_info(None) == "-"
+    assert side_info(folder).startswith("<dir>")
+    assert side_info(older).startswith("2.0 KB  20")
+    left_newer = DiffEntry("a.txt", "a.txt", DiffStatus.MODIFIED, newer, older)
+    right_newer = DiffEntry("a.txt", "a.txt", DiffStatus.MODIFIED, older, newer)
+    only_left = DiffEntry("a.txt", "a.txt", DiffStatus.LEFT_ONLY, older, None)
+    assert status_text(left_newer) == "! modified (left newer)"
+    assert status_text(right_newer) == "! modified (right newer)"
+    assert status_text(only_left) == "< only left"
+
+
+@pytest.mark.asyncio
+async def test_compare_table_shows_size_and_date_of_both_sides(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (right / "a.txt").write_text("hello world, longer")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        await pilot.pause()
+        table = app.screen.query_one("#compare-table")
+        assert [str(c.label) for c in table.columns.values()][-2:] == [
+            "Left (size, date)",
+            "Right (size, date)",
+        ]
+        row = table.get_row_at(0)
+        assert "5.0 B" in row[3]
+        assert "19.0 B" in row[4]
+
+
+@pytest.mark.asyncio
+async def test_compare_shows_spinner_while_scanning_and_esc_cancels(tmp_path, monkeypatch):
+    import threading
+    from commandertui import compare_screen
+
+    release = threading.Event()
+
+    def slow_compare(left, right, cancel_check=None):
+        while not release.is_set() and not (cancel_check and cancel_check()):
+            release.wait(0.02)
+        return []
+
+    monkeypatch.setattr(compare_screen, "compare", slow_compare)
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        await pilot.pause(0.3)
+        screen = app.screen
+        assert screen.__class__.__name__ == "CompareScreen" and screen.scanning
+        text = str(screen.query_one("#compare-summary").render())
+        assert "Comparing" in text and "Esc to cancel" in text
+        await pilot.press("m")  # actions are refused while scanning
+        await pilot.pause()
+        assert app.screen is screen
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_compare_spinner_stops_and_result_appears_when_done(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (right / "a.txt").write_text("different")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        for _ in range(50):
+            await pilot.pause(0.05)
+            if not app.screen.scanning:
+                break
+        assert not app.screen.scanning
+        assert "1 differences" in str(app.screen.query_one("#compare-summary").render())
+
+
+@pytest.mark.asyncio
+async def test_default_theme_is_phosphor_green_and_t_button_opens_picker(tmp_path):
+    from commandertui.modals import ChoiceScreen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        assert app.theme == "phosphor-green"
+        await pilot.press("t")
+        await pilot.pause()
+        assert isinstance(app.screen, ChoiceScreen)
+
+
+@pytest.mark.asyncio
+async def test_picking_a_theme_applies_and_saves_it(tmp_path):
+    from commandertui import settings
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("t", "down", "down", "enter")  # green -> amber -> nord
+        await pilot.pause()
+        assert app.theme == "nord"
+    assert settings.load_theme() == "nord"
+
+
+@pytest.mark.asyncio
+async def test_escape_in_theme_picker_restores_the_previous_theme(tmp_path):
+    from commandertui import settings
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("t", "down", "down")
+        await pilot.pause()
+        assert app.theme == "nord"  # previewed live while moving
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.theme == "phosphor-green"
+    assert settings.load_theme() == "phosphor-green"  # the preview was not kept
+
+
+@pytest.mark.asyncio
+async def test_saved_theme_is_used_at_startup_and_unknown_one_is_ignored(tmp_path):
+    from commandertui import settings
+
+    from commandertui.app import CommanderApp
+
+    settings.save_theme("dracula")
+    assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "dracula"
+    settings.save_theme("no-such-theme")
+    assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "phosphor-green"

@@ -326,6 +326,7 @@ class MainTopBar(ActionBar):
         ("p", "Places", "show_places"),
         ("r", "Refresh", "refresh_both"),
         ("h", "Hidden", "toggle_hidden"),
+        ("t", "Theme", "pick_theme"),
         ("i", "Size", "show_size"),
         ("q", "Quit", "app.quit"),
     ]
@@ -337,6 +338,7 @@ class FunctionBar(ActionBar):
     PREFIX = "fb"
     KEYS = [
         ("F2", "Rename", "rename"),
+        ("F4", "Edit", "edit"),
         ("F5", "Copy", "copy"),
         ("F6", "Move", "move"),
         ("F7", "MkDir", "make_dir"),

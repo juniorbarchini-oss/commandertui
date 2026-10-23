@@ -1,255 +1,284 @@
 from __future__ import annotations
 
-# Phosphor palettes, consistent with the rest of the green-CRT TUI family
-# (btrfs-restore-tui). Amber is the classic VT220 alternative for long
-# sessions.
-PALETTES = {
-    "green": {
-        "foreground": "#00FF66",
-        "dim": "#0A5C2C",
-        "background": "#001A0D",
-        "accent": "#66FFB2",
-        "danger": "#FF4444",
-        "warning": "#FFD24C",
-    },
-    "amber": {
-        "foreground": "#FFB000",
-        "dim": "#5C3F00",
-        "background": "#1A1000",
-        "accent": "#FFD24C",
-        "danger": "#FF4444",
-        "warning": "#FFEE66",
-    },
+from textual.theme import Theme
+
+# The two phosphor palettes (green CRT, amber VT220) are regular Textual
+# themes, so they sit in the same list as the stock ones (nord, gruvbox...).
+PHOSPHOR_THEMES = [
+    Theme(
+        name="phosphor-green",
+        primary="#00FF66",
+        secondary="#0A5C2C",
+        accent="#66FFB2",
+        warning="#FFD24C",
+        error="#FF4444",
+        success="#00FF66",
+        foreground="#00FF66",
+        background="#001A0D",
+        surface="#001A0D",
+        panel="#001A0D",
+        dark=True,
+    ),
+    Theme(
+        name="phosphor-amber",
+        primary="#FFB000",
+        secondary="#5C3F00",
+        accent="#FFD24C",
+        warning="#FFEE66",
+        error="#FF4444",
+        success="#FFB000",
+        foreground="#FFB000",
+        background="#1A1000",
+        surface="#1A1000",
+        panel="#1A1000",
+        dark=True,
+    ),
+]
+
+DEFAULT_THEME = "phosphor-green"
+
+# (label shown in the picker, Textual theme name)
+THEME_CHOICES = [
+    ("Phosphor green", "phosphor-green"),
+    ("Phosphor amber", "phosphor-amber"),
+    ("Nord", "nord"),
+    ("Gruvbox", "gruvbox"),
+    ("Dracula", "dracula"),
+    ("Tokyo Night", "tokyo-night"),
+    ("Catppuccin Mocha", "catppuccin-mocha"),
+    ("Solarized Dark", "solarized-dark"),
+    ("Monokai", "monokai"),
+    ("Textual Dark", "textual-dark"),
+]
+
+# Written with Textual's theme variables only ($primary = borders/highlights,
+# $foreground = text, $error/$warning/$accent = meaning colors), so every
+# theme above restyles the whole app.
+CSS = """
+Screen {
+    background: $background;
+    color: $foreground;
 }
 
-
-def css_for(palette_name: str = "green") -> str:
-    p = PALETTES.get(palette_name, PALETTES["green"])
-    return f"""
-Screen {{
-    background: {p['background']};
-    color: {p['foreground']};
-}}
-
 /* The filter bar floats over the panes so you watch the list shrink as you type. */
-FilterScreen {{
+FilterScreen {
     background: transparent;
-}}
+}
 
-.dim {{
-    color: {p['dim']};
-}}
+.dim {
+    color: $foreground 40%;
+}
 
-.accent {{
-    color: {p['accent']};
-}}
+.accent {
+    color: $accent;
+}
 
-.danger {{
-    color: {p['danger']};
-}}
+.danger {
+    color: $error;
+}
 
-.warning {{
-    color: {p['warning']};
-}}
+.warning {
+    color: $warning;
+}
 
-Header, Footer {{
-    background: {p['background']};
-    color: {p['foreground']};
-}}
+Header, Footer {
+    background: $background;
+    color: $foreground;
+}
 
 /* DataTable draws its own cell colors independently of Screen, so every
    part of it needs to be told about the palette explicitly -- otherwise it
    falls back to Textual's default theme (white text) regardless of what the
    rest of the app looks like. */
-DataTable {{
-    background: {p['background']};
-    color: {p['foreground']};
-    scrollbar-color: {p['dim']};
-    scrollbar-background: {p['background']};
-}}
+DataTable {
+    background: $background;
+    color: $foreground;
+    scrollbar-color: $foreground 40%;
+    scrollbar-background: $background;
+}
 
-DataTable > .datatable--header {{
-    background: {p['background']};
-    color: {p['accent']};
+DataTable > .datatable--header {
+    background: $background;
+    color: $accent;
     text-style: bold;
-}}
+}
 
-DataTable > .datatable--cursor {{
-    background: {p['foreground']};
-    color: {p['background']};
-}}
+DataTable > .datatable--cursor {
+    background: $primary;
+    color: $background;
+}
 
-DataTable > .datatable--odd-row {{
-    background: {p['background']};
-}}
+DataTable > .datatable--odd-row {
+    background: $background;
+}
 
-DataTable > .datatable--even-row {{
-    background: {p['background']};
-}}
+DataTable > .datatable--even-row {
+    background: $background;
+}
 
-ConfirmScreen #confirm-box {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: heavy {p['foreground']};
-}}
+ConfirmScreen #confirm-box {
+    background: $background;
+    color: $foreground;
+    border: heavy $primary;
+}
 
-ConfirmScreen #confirm-box.danger {{
-    color: {p['danger']};
-    border: heavy {p['danger']};
-}}
+ConfirmScreen #confirm-box.danger {
+    color: $error;
+    border: heavy $error;
+}
 
-ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FilterScreen Button, UpdateScreen Button {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: tall {p['foreground']};
+ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FilterScreen Button, UpdateScreen Button {
+    background: $background;
+    color: $foreground;
+    border: tall $primary;
     text-style: none;
-}}
+}
 
-ConfirmScreen Button.danger, ProgressScreen Button.danger {{
-    color: {p['danger']};
-    border: tall {p['danger']};
-}}
+ConfirmScreen Button.danger, ProgressScreen Button.danger {
+    color: $error;
+    border: tall $error;
+}
 
-ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FilterScreen Button:focus, UpdateScreen Button:focus {{
-    background: {p['foreground']};
-    color: {p['background']};
+ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FilterScreen Button:focus, UpdateScreen Button:focus {
+    background: $primary;
+    color: $background;
     text-style: bold;
-}}
+}
 
-ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
-    background: {p['danger']};
-    color: {p['background']};
-}}
+ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {
+    background: $error;
+    color: $background;
+}
 
-MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box, FilterScreen #filter-box, UpdateScreen #update-box {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: heavy {p['foreground']};
-}}
+MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box, FilterScreen #filter-box, UpdateScreen #update-box {
+    background: $background;
+    color: $foreground;
+    border: heavy $primary;
+}
 
-InputScreen #input-box {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: heavy {p['foreground']};
-}}
+InputScreen #input-box {
+    background: $background;
+    color: $foreground;
+    border: heavy $primary;
+}
 
-InputScreen Input, FilterScreen Input {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: tall {p['dim']};
-}}
+InputScreen Input, FilterScreen Input {
+    background: $background;
+    color: $foreground;
+    border: tall $foreground 40%;
+}
 
-InputScreen Input:focus, FilterScreen Input:focus {{
-    border: tall {p['foreground']};
-}}
+InputScreen Input:focus, FilterScreen Input:focus {
+    border: tall $primary;
+}
 
-InputScreen Input > .input--cursor, FilterScreen Input > .input--cursor {{
-    background: {p['foreground']};
-    color: {p['background']};
-}}
+InputScreen Input > .input--cursor, FilterScreen Input > .input--cursor {
+    background: $primary;
+    color: $background;
+}
 
-InputScreen Input > .input--selection, FilterScreen Input > .input--selection {{
-    background: {p['dim']};
-    color: {p['foreground']};
-}}
+InputScreen Input > .input--selection, FilterScreen Input > .input--selection {
+    background: $foreground 40%;
+    color: $foreground;
+}
 
-ChoiceScreen OptionList {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: tall {p['dim']};
-}}
+ChoiceScreen OptionList {
+    background: $background;
+    color: $foreground;
+    border: tall $foreground 40%;
+}
 
-ChoiceScreen OptionList:focus {{
-    border: tall {p['foreground']};
-}}
+ChoiceScreen OptionList:focus {
+    border: tall $primary;
+}
 
-ChoiceScreen OptionList > .option-list--option-highlighted {{
-    background: {p['foreground']};
-    color: {p['background']};
+ChoiceScreen OptionList > .option-list--option-highlighted {
+    background: $primary;
+    color: $background;
     text-style: bold;
-}}
+}
 
-FilePanel {{
-    border: round {p['dim']};
-}}
+FilePanel {
+    border: round $foreground 40%;
+}
 
-FilePanel.active-panel {{
-    border: heavy {p['foreground']};
-}}
+FilePanel.active-panel {
+    border: heavy $primary;
+}
 
-DataTable:blur > .datatable--cursor {{
-    background: {p['dim']};
-    color: {p['background']};
-}}
+DataTable:blur > .datatable--cursor {
+    background: $foreground 40%;
+    color: $background;
+}
 
-CompareBar {{
+CompareBar {
     dock: bottom;
-}}
+}
 
-#bars {{
+#bars {
     height: auto;
-}}
+}
 
-#bars.wide {{
+#bars.wide {
     layout: horizontal;
     height: 3;
-}}
+}
 
-#bars.narrow {{
+#bars.narrow {
     layout: vertical;
     height: 6;
-}}
+}
 
-#bars.wide MainTopBar, #bars.wide FunctionBar {{
+#bars.wide MainTopBar, #bars.wide FunctionBar {
     width: auto;
-}}
+}
 
-#bars.narrow MainTopBar, #bars.narrow FunctionBar {{
+#bars.narrow MainTopBar, #bars.narrow FunctionBar {
     width: 100%;
-}}
+}
 
-MainTopBar, FunctionBar, CompareBar {{
+MainTopBar, FunctionBar, CompareBar {
     height: 3;
-    background: {p['background']};
-}}
+    background: $background;
+}
 
-FnButton {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: round {p['foreground']};
+FnButton {
+    background: $background;
+    color: $foreground;
+    border: round $primary;
     min-width: 0;
     width: auto;
     padding: 0;
     margin: 0;
     text-style: none;
-}}
+}
 
-FnButton:hover {{
-    background: {p['foreground']};
-    color: {p['background']};
-}}
+FnButton:hover {
+    background: $primary;
+    color: $background;
+}
 
-.pathrow {{
+.pathrow {
     height: 1;
-}}
+}
 
-.pathrow .pathbar {{
+.pathrow .pathbar {
     width: 1fr;
-}}
+}
 
-.pathrow .pathfree, .pathrow .pathsel {{
+.pathrow .pathfree, .pathrow .pathsel {
     width: auto;
     padding: 0 2;
-}}
+}
 
-.pathbar {{
-    color: {p['dim']};
+.pathbar {
+    color: $foreground 40%;
     padding: 0 1;
-}}
+}
 
-.pathbar.active {{
-    background: {p['foreground']};
-    color: {p['background']};
+.pathbar.active {
+    background: $primary;
+    color: $background;
     text-style: bold;
-}}
+}
 """

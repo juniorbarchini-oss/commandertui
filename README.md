@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.2.0** — 108/108 tests passing. MIT licensed.
+Status: **v1.3.0** — 119/119 tests passing. MIT licensed.
 
 ---
 
@@ -109,6 +109,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `Backspace` | Go to parent directory |
 | `Space` | Mark/unmark item under cursor |
 | `F2` | Rename the item under the cursor (never overwrites an existing name) |
+| `F4` | Edit the file under the cursor with `$VISUAL` / `$EDITOR` (falls back to nano, vim or vi); CommanderTUI pauses and comes back when you close the editor |
 | `F5` | Copy marked (or item under cursor) to the other pane |
 | `F6` | Move marked to the other pane |
 | `F7` | Create a folder in the active pane |
@@ -118,8 +119,9 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `u` | Update: shows the pending new version (see *Updates*) |
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
+| `t` | Color theme: Phosphor green (default), Phosphor amber, Nord, Gruvbox, Dracula, Tokyo Night, Catppuccin Mocha, Solarized Dark, Monokai, Textual Dark. Previews as you move, Enter keeps it (saved in `~/.config/commandertui/settings.json`), Esc goes back |
 | `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one |
-| `c` | Compare: full recursive diff between the two panes' current folders |
+| `c` | Compare: full recursive diff between the two panes' current folders, with size and date of both sides (and which is newer when a file changed) |
 | `r` | Refresh both panes |
 | `q` | Quit |
 
@@ -142,7 +144,7 @@ when picked. If the server asks for a login, `gio` asks for it in the
 terminal and can remember it in the system keyring, exactly like Nautilus.
 
 Every key also has a clickable box on the bottom bar: one row on wide windows
-(168+ columns), two rows when narrower (110 columns is the practical minimum).
+(168+ columns), two rows when narrower (120 columns is the practical minimum).
 The active pane has the thick border and the inverted path bar; each path bar
 shows the free space of that disk, and the marked count and total size.
 
@@ -195,7 +197,8 @@ commandertui/
 ├── executor.py             # runs an OperationQueue against the filesystem
 ├── bookmarks.py             # detected mounts (USB/SMB/rclone) + saved places
 ├── netlocations.py           # SMB/SFTP/FTP locations via gio (list shares, mount, save)
-├── theme.py                  # green/amber phosphor palettes
+├── theme.py                  # phosphor green/amber themes + the stylesheet (Textual theme variables)
+├── settings.py               # saved settings (color theme)
 ├── boot.py                    # startup "modem" reveal animation
 ├── widgets.py                  # FilePanel: one pane's directory listing
 ├── modals.py                    # Confirm / Places / Input / Size / Message screens
