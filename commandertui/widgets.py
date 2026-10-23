@@ -343,6 +343,7 @@ class FunctionBar(ActionBar):
         ("F6", "Move", "move"),
         ("F7", "MkDir", "make_dir"),
         ("F8", "Delete", "delete"),
+        ("u", "Updates", "update_app"),
     ]
 
 

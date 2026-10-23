@@ -1,5 +1,4 @@
 import json
-import time
 
 import pytest
 
@@ -15,18 +14,15 @@ def test_version_ordering_is_numeric_not_textual():
     assert not updater.is_newer("1.2.0rc1", "1.2.0")
 
 
-def test_check_fetches_then_reuses_the_cache_for_a_day(monkeypatch):
+def test_check_asks_pypi_on_every_launch(monkeypatch):
     calls = []
     monkeypatch.setattr(updater, "fetch_latest", lambda: calls.append(1) or "2.0.0")
     monkeypatch.setattr(updater, "detect_install", lambda: "pipx")
 
     info = updater.check(current="1.1.0", now=1000.0)
     assert info == updater.UpdateInfo("1.1.0", "2.0.0", "pipx")
-    assert updater.check(current="1.1.0", now=1000.0 + 3600) is not None
-    assert calls == [1]  # second call came from the cache
-
-    updater.check(current="1.1.0", now=1000.0 + updater.CHECK_EVERY + 1)
-    assert calls == [1, 1]  # a day later it asks again
+    assert updater.check(current="1.1.0", now=1000.0 + 60) is not None
+    assert calls == [1, 1]  # no daily cache: each launch asks again
 
 
 def test_check_is_silent_when_offline(monkeypatch):
@@ -47,7 +43,7 @@ def test_skipped_version_stays_quiet_but_a_newer_one_does_not(monkeypatch):
     updater.skip_version("2.0.0")
     assert updater.check(current="1.1.0") is None
     monkeypatch.setattr(updater, "fetch_latest", lambda: "2.1.0")
-    assert updater.check(current="1.1.0", now=time.time() + updater.CHECK_EVERY + 5).latest == "2.1.0"
+    assert updater.check(current="1.1.0").latest == "2.1.0"
 
 
 def test_fetch_latest_swallows_network_errors(monkeypatch):

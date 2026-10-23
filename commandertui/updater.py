@@ -2,8 +2,8 @@
 another app and change PACKAGE / REPO to give it the same behavior.
 
 What it does, and nothing more:
-  * once a day, in the background, asks PyPI for the latest version (a plain
-    GET; nothing about the user is sent);
+  * on every launch, in the background, asks PyPI for the latest version (a
+    plain GET; nothing about the user is sent);
   * tells the app if a newer one exists and it has not been skipped;
   * builds the right upgrade command for however this copy was installed.
 It never installs anything by itself -- the app runs the command only after
@@ -29,7 +29,6 @@ PACKAGE = "commandertui"
 REPO = "juniorbarchini-oss/commandertui"
 PYPI_URL = f"https://pypi.org/pypi/{PACKAGE}/json"
 CACHE_FILE = os.path.join(CONFIG_DIR, "update.json")
-CHECK_EVERY = 24 * 3600
 FETCH_TIMEOUT = 4
 ENV_DISABLE = "COMMANDERTUI_NO_UPDATE_CHECK"
 ENV_FAKE_LATEST = "COMMANDERTUI_FAKE_LATEST"  # shows the update dialog without a real release
@@ -132,21 +131,33 @@ def check(current: str = __version__, now: float | None = None) -> UpdateInfo | 
     now = time.time() if now is None else now
     cache = _load_cache()
 
-    fake = os.environ.get(ENV_FAKE_LATEST)
-    if fake:
-        latest = fake
-    elif cache.get("latest") and now - cache.get("checked", 0) < CHECK_EVERY:
-        latest = cache["latest"]
-    else:
-        latest = fetch_latest()
-        if latest is None:
-            return None
-        cache.update(checked=now, latest=latest)
-        _save_cache(cache)
+    # Asked every launch (one small GET in the background): a release is seen
+    # the moment it exists, not up to a day later.
+    latest = os.environ.get(ENV_FAKE_LATEST) or fetch_latest()
+    if latest is None:
+        return None
+    cache.update(checked=now, latest=latest)
+    _save_cache(cache)
 
     if not is_newer(latest, current) or cache.get("skipped") == latest:
         return None
     return UpdateInfo(current=current, latest=latest, install=detect_install())
+
+
+def check_now(current: str = __version__) -> tuple[UpdateInfo | None, bool]:
+    """The manual "Check for updates": always asks PyPI (ignores the daily
+    cache and a previous Skip, since the user is asking). Blocking (network).
+    Returns (UpdateInfo or None, reachable)."""
+    latest = os.environ.get(ENV_FAKE_LATEST) or fetch_latest()
+    if latest is None:
+        return None, False
+    cache = _load_cache()
+    cache.update(checked=time.time(), latest=latest)
+    cache.pop("skipped", None)
+    _save_cache(cache)
+    if not is_newer(latest, current):
+        return None, True
+    return UpdateInfo(current=current, latest=latest, install=detect_install()), True
 
 
 def skip_version(version: str) -> None:
