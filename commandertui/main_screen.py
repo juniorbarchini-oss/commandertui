@@ -9,7 +9,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from . import netlocations
+from . import netlocations, updater
 from .modals import (
     ADD_NETWORK,
     ChoiceScreen,
@@ -18,6 +18,7 @@ from .modals import (
     MessageScreen,
     PlacesScreen,
     SizeScreen,
+    UpdateScreen,
 )
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
@@ -44,6 +45,7 @@ class MainScreen(Screen):
         Binding("enter", "enter_dir", "Open", priority=True),
         Binding("backspace", "up_dir", "Up", priority=True),
         Binding("space", "toggle_mark", "Mark", priority=True),
+        Binding("u", "update_app", "Update", priority=True),
         Binding("slash", "filter", "Filter", priority=True),
         Binding("plus", "mark_pattern", "Mark pattern", priority=True),
         Binding("minus", "unmark_pattern", "Unmark pattern", priority=True),
@@ -86,6 +88,11 @@ class MainScreen(Screen):
 
     def on_resize(self, event) -> None:
         self._layout_bars()
+
+    def on_screen_resume(self) -> None:
+        # First time the main screen shows (the boot animation just closed):
+        # tell the user about an update the background check already found.
+        self.prompt_update()
 
     def _layout_bars(self) -> None:
         """One row of key boxes when the window is wide enough, two stacked
@@ -207,6 +214,39 @@ class MainScreen(Screen):
 
     def action_invert_marks(self) -> None:
         self._active_panel().invert_marks()
+
+    # ------------------------------------------------------------ updates
+    def action_update_app(self) -> None:
+        if self.app.update_info is None:
+            self.notify("CommanderTUI is up to date.")
+            return
+        self.app.update_prompted = False
+        self.prompt_update()
+
+    def prompt_update(self) -> None:
+        info = self.app.update_info
+        if info is None or self.app.update_prompted:
+            return
+        self.app.update_prompted = True
+
+        def on_choice(choice: str | None) -> None:
+            if choice == "skip":
+                updater.skip_version(info.latest)
+                self.app.clear_update()
+            elif choice == "now":
+                with self.app.suspend():
+                    ok = updater.run_update(info)
+                if ok:
+                    self.app.clear_update()
+                    self.app.push_screen(
+                        MessageScreen(f"Updated to {info.latest}.\nQuit and reopen CommanderTUI to use it.")
+                    )
+                else:
+                    self.app.push_screen(
+                        MessageScreen("The update did not finish. Check the terminal output, then try again.")
+                    )
+
+        self.app.push_screen(UpdateScreen(info), on_choice)
 
     def action_filter(self) -> None:
         panel = self._active_panel()

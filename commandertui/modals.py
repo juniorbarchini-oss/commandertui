@@ -547,3 +547,80 @@ class FilterScreen(ModalScreen[str | None]):
 
     def action_clear(self) -> None:
         self.dismiss(None)
+
+
+class UpdateScreen(ModalScreen[str]):
+    """A newer version exists. Dismisses with "now", "later" or "skip"; the
+    app only upgrades after "now"."""
+
+    DEFAULT_CSS = """
+    UpdateScreen {
+        align: center middle;
+    }
+    #update-box {
+        width: 80%;
+        min-width: 56;
+        max-width: 90;
+        height: auto;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #update-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #update-how {
+        margin-bottom: 1;
+    }
+    #update-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #update-buttons Button {
+        min-width: 18;
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "later", "Later", priority=True),
+        Binding("s", "skip", "Skip this version", priority=True),
+    ]
+
+    HOW = {
+        "pacman": "Installed as an Arch package: this rebuilds it with makepkg -si.\n"
+        "Your sudo password is typed in the terminal, not here.",
+        "pipx": "Installed with pipx: this runs  pipx upgrade commandertui.",
+        "pip": "Installed with pip: this runs  pip install --upgrade commandertui.",
+        "source": "You are running from a git checkout.\nUpdate it yourself with  git pull.",
+    }
+
+    def __init__(self, info) -> None:
+        super().__init__()
+        self.info = info
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="update-box"):
+            yield Static(
+                f"CommanderTUI {self.info.latest} is available (you have {self.info.current})",
+                id="update-title",
+            )
+            yield Static(self.HOW.get(self.info.install, ""), id="update-how", markup=False)
+            with Horizontal(id="update-buttons"):
+                if self.info.install != "source":
+                    yield Button("Update now", id="now")
+                yield Button("Later  (Esc)", id="later")
+                yield Button("Skip this version  (s)", id="skip")
+
+    def on_mount(self) -> None:
+        self.query_one("#now" if self.info.install != "source" else "#later", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id)
+
+    def action_later(self) -> None:
+        self.dismiss("later")
+
+    def action_skip(self) -> None:
+        self.dismiss("skip")
