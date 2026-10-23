@@ -4,10 +4,9 @@ import os
 
 from textual.app import App
 
-from . import updater
+from . import settings, theme, updater
 from .boot import BootScreen
 from .main_screen import MainScreen
-from .theme import css_for
 
 
 class CommanderApp(App):
@@ -15,17 +14,29 @@ class CommanderApp(App):
     see its docstring for why that split matters for key bindings.
     """
 
-    CSS = css_for("green")
+    CSS = theme.CSS
 
     def __init__(
         self, left_path: str | None = None, right_path: str | None = None, check_updates: bool = True
     ) -> None:
         super().__init__()
+        for phosphor in theme.PHOSPHOR_THEMES:
+            self.register_theme(phosphor)
+        saved = settings.load_theme()
+        self.theme = saved if saved in self.available_themes else theme.DEFAULT_THEME
         self.check_updates = check_updates and not updater.updates_disabled()
         self.update_info: updater.UpdateInfo | None = None
         self.update_prompted = False
         self.left_path = os.path.abspath(left_path or os.path.expanduser("~"))
         self.right_path = os.path.abspath(right_path or os.path.expanduser("~"))
+
+    def on_unmount(self) -> None:
+        # Whatever theme is showing when the app closes is the one to reopen
+        # with -- covers the picker (t) and Textual's own palette (ctrl+p).
+        settings.save_theme(self.theme)
+
+    def preview_theme(self, name: str) -> None:
+        self.theme = name
 
     def on_mount(self) -> None:
         self.push_screen(MainScreen(self.left_path, self.right_path))
