@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import os
 import shutil
 from datetime import datetime
@@ -132,6 +133,41 @@ class FilePanel(Vertical):
 
         shown = self.path + (f"   [filter: {self.filter_text}]" if self.filter_text else "")
         self.query_one(f"#{self.side}-pathbar", Static).update(shown)
+
+    # ------------------------------------------------ pattern selection
+    def _visible_paths(self) -> list[str]:
+        """Full paths of the rows on screen (respects the filter, skips "..")."""
+        return [os.path.join(self.path, name) for name, _ in self._rows if name != PARENT_MARK]
+
+    def _redraw_keeping_cursor(self) -> None:
+        table = self.query_one(f"#{self.side}-table", DataTable)
+        row = table.cursor_row
+        self._draw_rows()
+        table.move_cursor(row=min(row, max(table.row_count - 1, 0)))
+        self.update_selection()
+
+    def _matching(self, pattern: str) -> list[str]:
+        pattern = pattern.strip().lower()
+        if not any(c in pattern for c in "*?["):
+            pattern = f"*{pattern}*"  # plain text means "contains"
+        return [p for p in self._visible_paths() if fnmatch.fnmatchcase(os.path.basename(p).lower(), pattern)]
+
+    def mark_matching(self, pattern: str) -> int:
+        found = self._matching(pattern) if pattern.strip() else []
+        self.marked.update(found)
+        self._redraw_keeping_cursor()
+        return len(found)
+
+    def unmark_matching(self, pattern: str) -> int:
+        found = [p for p in self._matching(pattern) if p in self.marked] if pattern.strip() else []
+        self.marked.difference_update(found)
+        self._redraw_keeping_cursor()
+        return len(found)
+
+    def invert_marks(self) -> None:
+        visible = set(self._visible_paths())
+        self.marked ^= visible
+        self._redraw_keeping_cursor()
 
     def set_filter(self, text: str) -> None:
         """Show only entries whose name contains `text` (case-insensitive)."""
@@ -285,6 +321,7 @@ class MainTopBar(ActionBar):
     KEYS = [
         ("Tab", "Pane", "switch_pane"),
         ("/", "Filter", "filter"),
+        ("+", "Select", "select_menu"),
         ("c", "Compare", "show_compare"),
         ("p", "Places", "show_places"),
         ("r", "Refresh", "refresh_both"),

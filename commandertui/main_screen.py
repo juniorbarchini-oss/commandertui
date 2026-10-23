@@ -45,6 +45,9 @@ class MainScreen(Screen):
         Binding("backspace", "up_dir", "Up", priority=True),
         Binding("space", "toggle_mark", "Mark", priority=True),
         Binding("slash", "filter", "Filter", priority=True),
+        Binding("plus", "mark_pattern", "Mark pattern", priority=True),
+        Binding("minus", "unmark_pattern", "Unmark pattern", priority=True),
+        Binding("asterisk", "invert_marks", "Invert marks", priority=True),
         Binding("f2", "rename", "Rename", priority=True),
         Binding("f5", "copy", "Copy", priority=True),
         Binding("f6", "move", "Move", priority=True),
@@ -169,6 +172,42 @@ class MainScreen(Screen):
         self.app.push_screen(InputScreen("New folder name:"), on_named)
 
     # --------------------------------------------------------- op queues
+    SELECT_MENU = ["Mark by pattern  (+)", "Unmark by pattern  (-)", "Invert marks  (*)"]
+
+    def action_select_menu(self) -> None:
+        def on_choice(choice: str | None) -> None:
+            if choice == self.SELECT_MENU[0]:
+                self.action_mark_pattern()
+            elif choice == self.SELECT_MENU[1]:
+                self.action_unmark_pattern()
+            elif choice == self.SELECT_MENU[2]:
+                self.action_invert_marks()
+
+        self.app.push_screen(ChoiceScreen("Select", self.SELECT_MENU), on_choice)
+
+    def action_mark_pattern(self) -> None:
+        panel = self._active_panel()
+
+        def on_pattern(pattern: str | None) -> None:
+            if pattern:
+                count = panel.mark_matching(pattern)
+                self.notify(f"Marked {count} item(s)." if count else "Nothing matches.")
+
+        self.app.push_screen(InputScreen("Mark items matching (e.g. *.iso, or plain text):"), on_pattern)
+
+    def action_unmark_pattern(self) -> None:
+        panel = self._active_panel()
+
+        def on_pattern(pattern: str | None) -> None:
+            if pattern:
+                count = panel.unmark_matching(pattern)
+                self.notify(f"Unmarked {count} item(s)." if count else "No marked item matches.")
+
+        self.app.push_screen(InputScreen("Unmark items matching (e.g. *.iso, or plain text):"), on_pattern)
+
+    def action_invert_marks(self) -> None:
+        self._active_panel().invert_marks()
+
     def action_filter(self) -> None:
         panel = self._active_panel()
         self.app.push_screen(
