@@ -26,6 +26,9 @@ class CommanderApp(App):
         self.theme = saved if saved in self.available_themes else theme.DEFAULT_THEME
         self.check_updates = check_updates and not updater.updates_disabled()
         self.update_info: updater.UpdateInfo | None = None
+        # What the boot screen's CHECKING UPDATES line shows.
+        self.update_state = "pending" if self.check_updates else "off"
+        self.update_latest = ""
         self.update_prompted = False
         self.left_path = os.path.abspath(left_path or os.path.expanduser("~"))
         self.right_path = os.path.abspath(right_path or os.path.expanduser("~"))
@@ -40,18 +43,21 @@ class CommanderApp(App):
 
     def on_mount(self) -> None:
         self.push_screen(MainScreen(self.left_path, self.right_path))
-        self.push_screen(BootScreen(), self._after_boot)
-
-    def _after_boot(self, _result=None) -> None:
-        # Looked up only once the boot animation is over, so a quick answer
-        # can never pop a dialog over it.
+        self.push_screen(BootScreen())
+        # Looked up while the boot animation plays (it shows the result); the
+        # dialog itself waits for the main screen, so it never covers the boot.
         if self.check_updates:
             self.run_worker(self._look_for_update, thread=True)
 
     def _look_for_update(self) -> None:
-        info = updater.check()
+        info, status = updater.check_status()
+        self.call_from_thread(self._update_checked, info, status)
+
+    def _update_checked(self, info: updater.UpdateInfo | None, status: str) -> None:
+        self.update_state = status
         if info:
-            self.call_from_thread(self.update_found, info)
+            self.update_latest = info.latest
+            self.update_found(info)
 
     def update_found(self, info: updater.UpdateInfo) -> None:
         """Remember the newer version and say so in the header; the dialog

@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.3.0** — 122/122 tests passing. MIT licensed.
+Status: **v1.3.0** — 127/127 tests passing. MIT licensed.
 
 ---
 
@@ -150,7 +150,8 @@ shows the free space of that disk, and the marked count and total size.
 
 ## Updates
 
-On every launch, in the background and only after the start-up animation, the app
+On every launch, in the background while the start-up animation plays (its
+CHECKING UPDATES line shows the result), the app
 asks PyPI for the latest version (a plain GET, nothing about you is sent). If
 a newer one exists you get a dialog -- **Update now / Later / Skip this
 version** -- and the header keeps saying `update X available (press u)`.
