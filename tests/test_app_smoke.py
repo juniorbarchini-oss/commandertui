@@ -278,3 +278,30 @@ async def test_rename_rejects_path_separators(tmp_path):
     async with app.run_test(size=(140, 30)) as pilot:
         await _rename_via_dialog(app, pilot, "../evil")
         assert (left / "a.txt").exists() and not (tmp_path / "evil").exists()
+
+
+@pytest.mark.asyncio
+async def test_mkdir_dialog_ok_button_creates_folder(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("f7")
+        await pilot.pause()
+        app.screen.query_one("#input-field").value = "newdir"
+        await pilot.click("#ok")
+        await pilot.pause()
+    assert (left / "newdir").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_mkdir_dialog_cancel_button_creates_nothing(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("f7")
+        await pilot.pause()
+        app.screen.query_one("#input-field").value = "newdir"
+        await pilot.click("#cancel")
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmScreen) and app.screen.__class__.__name__ == "MainScreen"
+    assert not (left / "newdir").exists()

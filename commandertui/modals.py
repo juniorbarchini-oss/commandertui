@@ -153,22 +153,35 @@ class PlacesScreen(ModalScreen[str | None]):
 
 
 class InputScreen(ModalScreen[str | None]):
-    """A single text prompt (e.g. new folder name). Enter confirms with the
-    current text, Escape cancels with None -- same shape as ConfirmScreen so
-    callers can use the same push_screen(..., callback) pattern."""
+    """A single text prompt (e.g. new folder name). Enter or the OK button
+    confirms with the current text, Escape or Cancel dismisses with None --
+    same shape as ConfirmScreen so callers can use the same
+    push_screen(..., callback) pattern."""
 
     DEFAULT_CSS = """
     InputScreen {
         align: center middle;
     }
     #input-box {
-        width: 60;
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
         height: auto;
-        border: solid $foreground;
-        padding: 1 2;
+        border: heavy $foreground;
+        padding: 1 3;
     }
-    #input-box Static {
+    #input-prompt {
+        text-style: bold;
         margin-bottom: 1;
+    }
+    #input-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #input-buttons Button {
+        min-width: 18;
+        margin: 0 2;
     }
     """
 
@@ -181,15 +194,26 @@ class InputScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="input-box"):
-            yield Static(self.prompt)
+            yield Static(self.prompt, id="input-prompt")
             yield Input(value=self.initial, id="input-field")
-        yield Footer()
+            with Horizontal(id="input-buttons"):
+                yield Button("OK  (Enter)", id="ok")
+                yield Button("Cancel  (Esc)", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
 
+    def _submit(self) -> None:
+        self.dismiss(self.query_one(Input).value.strip() or None)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value.strip() or None)
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._submit()
+        else:
+            self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
