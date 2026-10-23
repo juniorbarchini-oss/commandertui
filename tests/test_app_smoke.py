@@ -1,7 +1,7 @@
 import pytest
 
 from commandertui.app import CommanderApp
-from commandertui.modals import ConfirmScreen
+from commandertui.modals import ConfirmScreen, MessageScreen
 
 
 async def _skip_boot(pilot):
@@ -353,7 +353,7 @@ async def test_main_bars_fit_in_110_columns(tmp_path):
     async with app.run_test(size=(110, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        assert len(buttons) == 14
+        assert len(buttons) == 15
         assert all(b.region.right <= 110 for b in buttons)
 
 
@@ -759,3 +759,58 @@ async def test_u_says_up_to_date_when_nothing_is_pending(tmp_path):
         await pilot.press("u")
         await pilot.pause()
         assert any("up to date" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_f4_opens_the_editor_on_the_selected_file(tmp_path, monkeypatch):
+    import contextlib
+    from commandertui import main_screen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    calls = []
+    monkeypatch.setattr(main_screen.editor, "editor_command", lambda: ["myeditor", "-x"])
+    monkeypatch.setattr(main_screen.subprocess, "run", lambda cmd: calls.append(cmd))
+    app.suspend = contextlib.nullcontext  # headless tests have no real terminal to hand over
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("down", "f4")  # row 0 is ".."; a.txt is next
+        await pilot.pause()
+    assert calls == [["myeditor", "-x", str(left / "a.txt")]]
+
+
+@pytest.mark.asyncio
+async def test_f4_on_a_folder_or_parent_does_not_start_the_editor(tmp_path, monkeypatch):
+    import contextlib
+    from commandertui import main_screen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "sub").mkdir()
+    calls = []
+    monkeypatch.setattr(main_screen.editor, "editor_command", lambda: ["myeditor"])
+    monkeypatch.setattr(main_screen.subprocess, "run", lambda cmd: calls.append(cmd))
+    app.suspend = contextlib.nullcontext
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("f4")  # on ".."
+        await pilot.pause()
+        await pilot.press("down", "f4")  # folders sort first: "sub"
+        await pilot.pause()
+        assert isinstance(app.screen, MessageScreen)  # tells the user it is a folder
+    assert calls == []
+
+
+def test_editor_command_prefers_visual_then_editor_then_fallback(monkeypatch):
+    from commandertui import editor
+
+    monkeypatch.setattr(editor.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setenv("VISUAL", "code -w")
+    monkeypatch.setenv("EDITOR", "nano")
+    assert editor.editor_command() == ["code", "-w"]
+    monkeypatch.delenv("VISUAL")
+    assert editor.editor_command() == ["nano"]
+    monkeypatch.delenv("EDITOR")
+    assert editor.editor_command() == ["nano"]  # first fallback
+    monkeypatch.setattr(editor.shutil, "which", lambda name: None)
+    assert editor.editor_command() is None
+    monkeypatch.setenv("EDITOR", "does-not-exist")
+    assert editor.editor_command() is None

@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.2.0** — 108/108 tests passing. MIT licensed.
+Status: **v1.2.0** — 111/111 tests passing. MIT licensed.
 
 ---
 
@@ -109,6 +109,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `Backspace` | Go to parent directory |
 | `Space` | Mark/unmark item under cursor |
 | `F2` | Rename the item under the cursor (never overwrites an existing name) |
+| `F4` | Edit the file under the cursor with `$VISUAL` / `$EDITOR` (falls back to nano, vim or vi); CommanderTUI pauses and comes back when you close the editor |
 | `F5` | Copy marked (or item under cursor) to the other pane |
 | `F6` | Move marked to the other pane |
 | `F7` | Create a folder in the active pane |
