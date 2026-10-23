@@ -264,7 +264,7 @@ class MainScreen(Screen):
             else:
                 self._go_to(path)
 
-        self.app.push_screen(PlacesScreen(), on_picked)
+        self.app.push_screen(PlacesScreen(self._active_panel().path), on_picked)
 
     def _go_to(self, path: str) -> None:
         panel = self._active_panel()

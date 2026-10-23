@@ -473,3 +473,28 @@ async def test_choice_cancel_button(tmp_path):
         await pilot.click("#cancel")
         await pilot.pause()
     assert results == [None]
+
+
+@pytest.mark.asyncio
+async def test_places_save_here_bookmarks_the_active_folder(tmp_path, monkeypatch):
+    from commandertui import bookmarks
+    from commandertui.modals import PlacesScreen
+
+    monkeypatch.setattr(bookmarks, "CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(bookmarks, "BOOKMARKS_FILE", str(tmp_path / "cfg" / "bookmarks.json"))
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("p")
+        await pilot.pause()
+        assert isinstance(app.screen, PlacesScreen)
+        await pilot.press("s")  # opens the name prompt, preloaded with the folder name
+        await pilot.pause()
+        field = app.screen.query_one("#input-field")
+        assert field.value == "left"
+        field.value = "My left"
+        await pilot.click("#ok")
+        await pilot.pause()
+        assert isinstance(app.screen, PlacesScreen)
+        assert any(p.label == "My left" and p.path == str(left) for p in bookmarks.load_saved())
+    assert [p.label for p in bookmarks.load_saved()] == ["My left"]

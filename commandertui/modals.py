@@ -9,7 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, OptionList, Static
 
-from .bookmarks import Place, all_places, remove_bookmark
+from .bookmarks import Place, all_places, remove_bookmark, save_bookmark
 from .models import OpKind, OperationQueue
 from .netlocations import remove_location
 from .scanner import tree_stats
@@ -148,16 +148,21 @@ class PlacesScreen(ModalScreen[str | None]):
         margin-top: 1;
     }
     #places-buttons Button {
-        min-width: 20;
+        min-width: 16;
         margin: 0 1;
     }
     """
 
     BINDINGS = [
         Binding("a", "add_network", "Add network", priority=True),
+        Binding("s", "save_here", "Save here", priority=True),
         Binding("d", "delete_saved", "Delete saved", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
     ]
+
+    def __init__(self, current_path: str | None = None) -> None:
+        super().__init__()
+        self.current_path = current_path
 
     def compose(self) -> ComposeResult:
         table = DataTable(id="places-table", cursor_type="row")
@@ -167,6 +172,7 @@ class PlacesScreen(ModalScreen[str | None]):
             yield table
             with Horizontal(id="places-buttons"):
                 yield Button("Add network  (a)", id="add")
+                yield Button("Save here  (s)", id="save")
                 yield Button("Delete saved  (d)", id="delete")
                 yield Button("Close  (Esc)", id="close")
 
@@ -183,6 +189,21 @@ class PlacesScreen(ModalScreen[str | None]):
     def action_add_network(self) -> None:
         self.dismiss(ADD_NETWORK)
 
+    def action_save_here(self) -> None:
+        """Bookmark the folder the active pane is in, under a name you pick."""
+        if not self.current_path:
+            return
+        path = self.current_path
+
+        def on_named(label: str | None) -> None:
+            if label:
+                save_bookmark(label, path)
+                self._fill()
+
+        self.app.push_screen(
+            InputScreen(f"Save {path} as:", initial=os.path.basename(path.rstrip("/")) or path), on_named
+        )
+
     def action_delete_saved(self) -> None:
         table = self.query_one("#places-table", DataTable)
         if not self.places or table.cursor_row >= len(self.places):
@@ -198,7 +219,11 @@ class PlacesScreen(ModalScreen[str | None]):
         self._fill()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        {"add": self.action_add_network, "delete": self.action_delete_saved}.get(
+        {
+            "add": self.action_add_network,
+            "save": self.action_save_here,
+            "delete": self.action_delete_saved,
+        }.get(
             event.button.id, self.action_cancel
         )()
 
