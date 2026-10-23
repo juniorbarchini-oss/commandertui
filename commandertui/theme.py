@@ -165,6 +165,28 @@ CompareBar {{
     dock: bottom;
 }}
 
+#bars {{
+    height: auto;
+}}
+
+#bars.wide {{
+    layout: horizontal;
+    height: 3;
+}}
+
+#bars.narrow {{
+    layout: vertical;
+    height: 6;
+}}
+
+#bars.wide MainTopBar, #bars.wide FunctionBar {{
+    width: auto;
+}}
+
+#bars.narrow MainTopBar, #bars.narrow FunctionBar {{
+    width: 100%;
+}}
+
 MainTopBar, FunctionBar, CompareBar {{
     height: 3;
     background: {p['background']};

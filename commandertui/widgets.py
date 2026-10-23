@@ -173,6 +173,11 @@ class ActionBar(Horizontal):
     KEYS: list[tuple[str, str, str]] = []  # (key, label, action)
     PREFIX = "fn"  # button ids are PREFIX-<n>; unique per bar on a screen
 
+    @classmethod
+    def needed_width(cls) -> int:
+        """Columns the boxes take side by side: label plus 2 border and 2 padding cells."""
+        return sum(len(f"{key} {label}") + 4 for key, label, _ in cls.KEYS)
+
     def compose(self) -> ComposeResult:
         for i, (key, label, action) in enumerate(self.KEYS):
             button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"{self.PREFIX}-{i}")

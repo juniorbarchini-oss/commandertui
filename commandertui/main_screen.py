@@ -63,11 +63,25 @@ class MainScreen(Screen):
         with Horizontal():
             yield FilePanel(self.left_path, side="left", id="panel-left")
             yield FilePanel(self.right_path, side="right", id="panel-right")
-        yield MainTopBar()
-        yield FunctionBar()
+        with Horizontal(id="bars"):
+            yield MainTopBar()
+            yield FunctionBar()
 
     def on_mount(self) -> None:
         self._set_active("left")
+        self._layout_bars()
+
+    def on_resize(self, event) -> None:
+        self._layout_bars()
+
+    def _layout_bars(self) -> None:
+        """One row of key boxes when the window is wide enough, two stacked
+        rows (tools above, F-keys below) when it is not."""
+        needed = MainTopBar.needed_width() + FunctionBar.needed_width() + 2
+        wide = self.size.width >= needed
+        bars = self.query_one("#bars")
+        bars.set_class(wide, "wide")
+        bars.set_class(not wide, "narrow")
 
     # ------------------------------------------------------------ helpers
     def _panel(self, side: str) -> FilePanel:

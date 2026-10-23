@@ -355,3 +355,28 @@ async def test_main_bars_fit_in_100_columns(tmp_path):
         buttons = list(app.screen.query("FnButton"))
         assert len(buttons) == 12
         assert all(b.region.right <= 100 for b in buttons)
+
+
+@pytest.mark.asyncio
+async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(200, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause()
+        rows = {b.region.y for b in app.screen.query("FnButton")}
+        assert len(rows) == 1  # everything on one line
+        await pilot.resize_terminal(100, 30)
+        await pilot.pause()
+        rows = {b.region.y for b in app.screen.query("FnButton")}
+        assert len(rows) == 2  # tools above, F-keys below
+        assert all(b.region.right <= 100 for b in app.screen.query("FnButton"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 120, 143, 144, 160, 250])
+async def test_bars_never_overflow_at_any_width(tmp_path, width):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(width, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause()
+        assert all(b.region.right <= width for b in app.screen.query("FnButton"))
