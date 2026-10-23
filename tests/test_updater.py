@@ -103,3 +103,16 @@ def test_cache_file_is_plain_json(monkeypatch):
     updater.check(current="1.1.0", now=5.0)
     with open(updater.CACHE_FILE) as f:
         assert json.load(f) == {"checked": 5.0, "latest": "3.0.0"}
+
+
+def test_check_status_tells_ok_new_skipped_and_offline(monkeypatch):
+    monkeypatch.setattr(updater, "detect_install", lambda: "pip")
+    monkeypatch.setattr(updater, "fetch_latest", lambda: "1.1.0")
+    assert updater.check_status(current="1.1.0") == (None, "ok")
+    monkeypatch.setattr(updater, "fetch_latest", lambda: "2.0.0")
+    info, status = updater.check_status(current="1.1.0")
+    assert status == "new" and info.latest == "2.0.0"
+    updater.skip_version("2.0.0")
+    assert updater.check_status(current="1.1.0") == (None, "skipped")
+    monkeypatch.setattr(updater, "fetch_latest", lambda: None)
+    assert updater.check_status(current="1.1.0") == (None, "offline")

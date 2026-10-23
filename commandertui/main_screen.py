@@ -245,6 +245,8 @@ class MainScreen(Screen):
         info = self.app.update_info
         if info is None or self.app.update_prompted:
             return
+        if self.app.screen is not self:
+            return  # the boot animation (or a dialog) is on top: resume will call us again
         self.app.update_prompted = True
 
         def on_choice(choice: str | None) -> None:

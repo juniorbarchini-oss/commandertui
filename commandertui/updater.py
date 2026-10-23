@@ -125,9 +125,10 @@ def updates_disabled(cli_flag: bool = False) -> bool:
     return cli_flag or bool(os.environ.get(ENV_DISABLE))
 
 
-def check(current: str = __version__, now: float | None = None) -> UpdateInfo | None:
-    """Blocking (network): call from a worker thread. Returns an UpdateInfo when
-    a newer, not-skipped version exists."""
+def check_status(current: str = __version__, now: float | None = None) -> tuple[UpdateInfo | None, str]:
+    """Blocking (network): call from a worker thread. Returns (info, status)
+    with status "new" (info set), "ok" (up to date), "skipped" (a newer one
+    exists but the user skipped it) or "offline"."""
     now = time.time() if now is None else now
     cache = _load_cache()
 
@@ -135,13 +136,20 @@ def check(current: str = __version__, now: float | None = None) -> UpdateInfo | 
     # the moment it exists, not up to a day later.
     latest = os.environ.get(ENV_FAKE_LATEST) or fetch_latest()
     if latest is None:
-        return None
+        return None, "offline"
     cache.update(checked=now, latest=latest)
     _save_cache(cache)
 
-    if not is_newer(latest, current) or cache.get("skipped") == latest:
-        return None
-    return UpdateInfo(current=current, latest=latest, install=detect_install())
+    if not is_newer(latest, current):
+        return None, "ok"
+    if cache.get("skipped") == latest:
+        return None, "skipped"
+    return UpdateInfo(current=current, latest=latest, install=detect_install()), "new"
+
+
+def check(current: str = __version__, now: float | None = None) -> UpdateInfo | None:
+    """Just the UpdateInfo of check_status(): None when there is nothing to offer."""
+    return check_status(current, now)[0]
 
 
 def check_now(current: str = __version__) -> tuple[UpdateInfo | None, bool]:

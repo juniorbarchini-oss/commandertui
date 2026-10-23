@@ -6,12 +6,18 @@ from commandertui.modals import ConfirmScreen, MessageScreen
 
 async def _skip_boot(pilot):
     """Boot screen no longer auto-dismisses: Enter fast-forwards the reveal,
-    a second Enter dismisses it -- mirrors what a user actually does."""
+    a later Enter dismisses it (one more if the update check finishes in
+    between) -- mirrors what a user actually does."""
     await pilot.pause()
-    await pilot.press("enter")
-    await pilot.pause()
-    await pilot.press("enter")
-    await pilot.pause()
+    for _ in range(4):
+        await pilot.press("enter")
+        await pilot.pause()
+        if app_screen_is_main(pilot.app):
+            break
+
+
+def app_screen_is_main(app) -> bool:
+    return app.screen.__class__.__name__ != "BootScreen"
 
 
 @pytest.mark.asyncio
@@ -678,8 +684,9 @@ async def test_update_dialog_appears_after_the_boot_screen(tmp_path, monkeypatch
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(140, 30)) as pilot:
         await pilot.pause(0.5)
-        assert app.update_info is None  # nothing is even looked up during the boot animation
-        assert not isinstance(app.screen, UpdateScreen)
+        assert app.update_info is not None  # looked up while the boot animation plays...
+        assert app.screen.__class__.__name__ == "BootScreen"
+        assert not isinstance(app.screen, UpdateScreen)  # ...but the dialog waits for the main screen
         await _skip_boot(pilot)
         await pilot.pause(0.5)
         assert isinstance(app.screen, UpdateScreen)
@@ -995,3 +1002,38 @@ async def test_saved_theme_is_used_at_startup_and_unknown_one_is_ignored(tmp_pat
     assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "dracula"
     settings.save_theme("no-such-theme")
     assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "phosphor-green"
+
+
+def test_title_doubles_when_scaled():
+    from commandertui.ascii_font import banner
+
+    small, big = banner("COMMANDER").split("\n"), banner("COMMANDER", scale=2).split("\n")
+    assert len(small) == 5 and len(big) == 10
+    assert len(big[0]) == 2 * len(small[0])
+    assert big[0] == big[1]  # each row repeated
+
+
+@pytest.mark.asyncio
+async def test_boot_shows_checking_updates_line_with_the_result(tmp_path, monkeypatch):
+    _enable_fake_update(monkeypatch)
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause(0.6)
+        await pilot.press("enter")  # fast-forward the reveal
+        await pilot.pause(0.3)
+        text = str(app.screen.query_one("#boot-text").render())
+        assert "CHECKING UPDATES" in text and "NEW 9.9.9" in text
+        assert "READY." in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width, scale", [(140, 2), (100, 1)])
+async def test_boot_title_is_double_size_only_in_a_wide_window(tmp_path, width, scale):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(width, 40)) as pilot:
+        await pilot.pause()
+        assert app.screen._scale == scale
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        lines = str(app.screen.query_one("#boot-text").render()).splitlines()
+        assert lines[0].startswith("+") and len(lines[0]) <= width  # the box always fits
