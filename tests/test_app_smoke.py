@@ -225,7 +225,8 @@ async def test_function_bar_click_runs_the_action(tmp_path):
     async with app.run_test(size=(130, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.press("down", "space")
-        await pilot.click("#fn-1")  # F5 Copy
+        copy_button = next(b for b in app.screen.query("FnButton") if b.action_name == "copy")
+        await pilot.click(f"#{copy_button.id}")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmScreen)
 
@@ -241,6 +242,205 @@ async def test_copy_with_nothing_selected_says_so(tmp_path):
         assert any("Nothing selected" in n.message for n in app._notifications)
 
 
+async def _rename_via_dialog(app, pilot, new_name):
+    await _skip_boot(pilot)
+    await pilot.press("down", "f2")  # row 0 is ".."; a.txt is next
+    await pilot.pause()
+    field = app.screen.query_one("#input-field")
+    assert field.value == "a.txt"  # current name preloaded
+    field.value = new_name
+    await pilot.press("enter")
+    await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_rename_with_f2(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _rename_via_dialog(app, pilot, "b.txt")
+        assert (left / "b.txt").read_text() == "hello" and not (left / "a.txt").exists()
+        assert app._panel("left").selected_name() == "b.txt"  # cursor follows
+
+
+@pytest.mark.asyncio
+async def test_rename_never_overwrites_existing(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "b.txt").write_text("other")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _rename_via_dialog(app, pilot, "b.txt")
+        assert (left / "a.txt").read_text() == "hello"
+        assert (left / "b.txt").read_text() == "other"
+
+
+@pytest.mark.asyncio
+async def test_rename_rejects_path_separators(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _rename_via_dialog(app, pilot, "../evil")
+        assert (left / "a.txt").exists() and not (tmp_path / "evil").exists()
+
+
+@pytest.mark.asyncio
+async def test_mkdir_dialog_ok_button_creates_folder(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("f7")
+        await pilot.pause()
+        app.screen.query_one("#input-field").value = "newdir"
+        await pilot.click("#ok")
+        await pilot.pause()
+    assert (left / "newdir").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_mkdir_dialog_cancel_button_creates_nothing(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("f7")
+        await pilot.pause()
+        app.screen.query_one("#input-field").value = "newdir"
+        await pilot.click("#cancel")
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmScreen) and app.screen.__class__.__name__ == "MainScreen"
+    assert not (left / "newdir").exists()
+
+
+@pytest.mark.asyncio
+async def test_message_ok_button_closes(tmp_path):
+    from commandertui.modals import MessageScreen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        app.push_screen(MessageScreen("Cancelled."))
+        await pilot.pause()
+        await pilot.click("#ok")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
+
+
+@pytest.mark.asyncio
+async def test_size_close_button_closes(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("down", "i")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "SizeScreen"
+        await pilot.click("#close")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
+
+
+@pytest.mark.asyncio
+async def test_compare_bar_back_button(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "CompareScreen"
+        await pilot.click("#fn-0")  # Esc Back
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
+
+
+@pytest.mark.asyncio
+async def test_main_bars_fit_in_100_columns(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _skip_boot(pilot)
+        buttons = list(app.screen.query("FnButton"))
+        assert len(buttons) == 12
+        assert all(b.region.right <= 100 for b in buttons)
+
+
+@pytest.mark.asyncio
+async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(200, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause()
+        rows = {b.region.y for b in app.screen.query("FnButton")}
+        assert len(rows) == 1  # everything on one line
+        await pilot.resize_terminal(100, 30)
+        await pilot.pause()
+        rows = {b.region.y for b in app.screen.query("FnButton")}
+        assert len(rows) == 2  # tools above, F-keys below
+        assert all(b.region.right <= 100 for b in app.screen.query("FnButton"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 120, 143, 144, 160, 250])
+async def test_bars_never_overflow_at_any_width(tmp_path, width):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(width, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause()
+        assert all(b.region.right <= width for b in app.screen.query("FnButton"))
+
+
+@pytest.mark.asyncio
+async def test_selection_counter_counts_files_and_folder_sizes(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "a.txt").write_text("x" * 1000)
+    (left / "dir").mkdir()
+    (left / "dir" / "big.bin").write_bytes(b"y" * 5000)
+    async with app.run_test(size=(150, 30)) as pilot:
+        await _skip_boot(pilot)
+        label = app._panel("left").query_one("#left-sel")
+        assert str(label.render()).strip() == ""
+        # rows: "..", dir/, a.txt (folders sort first)
+        await pilot.press("down", "space", "down", "space")
+        await pilot.pause(0.5)
+        text = str(label.render())
+        assert "2 marked" in text and "5.9 KB" in text
+        await pilot.press("space")  # unmark a.txt
+        await pilot.pause(0.5)
+        assert "1 marked" in str(label.render()) and "4.9 KB" in str(label.render())
+
+
+@pytest.mark.asyncio
+async def test_selection_counter_clears_after_the_marks_are_gone(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(150, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("down", "space")
+        await pilot.pause()
+        label = app._panel("left").query_one("#left-sel")
+        assert "1 marked" in str(label.render())
+        await pilot.press("r")  # refresh keeps marks; navigating clears them
+        app._panel("left").marked.clear()
+        app._panel("left").refresh_listing()
+        await pilot.pause()
+        assert str(label.render()).strip() == ""
+
+
+@pytest.mark.asyncio
+async def test_selection_counter_spins_while_folders_are_counted(tmp_path, monkeypatch):
+    import threading
+
+    from commandertui import widgets
+
+    release = threading.Event()
+    monkeypatch.setattr(widgets, "path_size", lambda p: (release.wait(5), 4096)[1])
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "dir").mkdir()
+    async with app.run_test(size=(150, 30)) as pilot:
+        await _skip_boot(pilot)
+        label = app._panel("left").query_one("#left-sel")
+        await pilot.press("down", "space")  # marks dir/ -> slow count starts
+        seen = set()
+        for _ in range(6):
+            await pilot.pause(0.15)
+            seen.add(str(label.render()).strip()[-1])
+        assert len(seen & set(widgets.SPINNER_FRAMES)) >= 2  # the frame keeps changing
+        release.set()
+        await pilot.pause(0.5)
+        final = str(label.render())
+        assert "4.0 KB" in final and not final.rstrip().endswith(tuple(widgets.SPINNER_FRAMES))
 @pytest.mark.asyncio
 async def test_places_buttons_close_and_add(tmp_path):
     from commandertui.modals import ADD_NETWORK, PlacesScreen

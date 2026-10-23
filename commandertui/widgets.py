@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import datetime
 
 from textual.app import ComposeResult
@@ -8,7 +9,10 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Button, DataTable, Static
 
+from .scanner import path_size
+
 PARENT_MARK = ".."
+SPINNER_FRAMES = "|/-\\"
 
 
 def _human_size(n: int) -> str:
@@ -18,6 +22,27 @@ def _human_size(n: int) -> str:
             return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
         size /= 1024
     return f"{size:.1f}T"
+
+
+def _format_bytes(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _free_space_label(path: str) -> str:
+    """"48.2 GB free" for the filesystem under `path`, or "" if it can't say
+    (permission, vanished mount, FUSE that reports nothing)."""
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return ""
+    if usage.total <= 0:
+        return ""
+    return f"{_format_bytes(usage.free)} free"
 
 
 class FilePanel(Vertical):
@@ -35,9 +60,14 @@ class FilePanel(Vertical):
         self.marked: set[str] = set()
         self.path = os.path.abspath(start_path)
         self._rows: list[tuple[str, bool]] = []  # (name, is_dir), in display order
+        self._sel_generation = 0  # lets a stale background size count be ignored
+        self._spinner = None  # Timer animating the label while folders are counted
 
     def compose(self) -> ComposeResult:
-        yield Static(self.path, id=f"{self.side}-pathbar", classes="pathbar")
+        with Horizontal(classes="pathrow"):
+            yield Static(self.path, id=f"{self.side}-pathbar", classes="pathbar")
+            yield Static("", id=f"{self.side}-sel", classes="pathbar pathsel")
+            yield Static("", id=f"{self.side}-free", classes="pathbar pathfree")
         table = DataTable(id=f"{self.side}-table", cursor_type="row")
         table.add_columns(" ", "Name", "Size", "Modified")
         yield table
@@ -46,8 +76,8 @@ class FilePanel(Vertical):
         self.refresh_listing()
 
     def watch_active(self, active: bool) -> None:
-        bar = self.query_one(f"#{self.side}-pathbar", Static)
-        bar.set_class(active, "active")
+        for suffix in ("pathbar", "sel", "free"):
+            self.query_one(f"#{self.side}-{suffix}", Static).set_class(active, "active")
         self.set_class(active, "active-panel")
 
     def refresh_listing(self) -> None:
@@ -82,8 +112,66 @@ class FilePanel(Vertical):
             table.add_row(mark, display_name, size, mtime, key=entry.name)
             self._rows.append((entry.name, is_dir))
 
-        bar = self.query_one(f"#{self.side}-pathbar", Static)
-        bar.update(self.path)
+        self.query_one(f"#{self.side}-pathbar", Static).update(self.path)
+        self.query_one(f"#{self.side}-free", Static).update(_free_space_label(self.path))
+        self.update_selection()
+
+    def _stop_spinner(self) -> None:
+        if self._spinner is not None:
+            self._spinner.stop()
+            self._spinner = None
+
+    def update_selection(self) -> None:
+        """"4 marked  1.2 GB" in the path row, so the volume is known before
+        pressing F5/F8. Folder sizes are counted in a worker (a big tree or a
+        network share must not freeze the UI); the label shows the files'
+        total meanwhile."""
+        self._sel_generation += 1
+        generation = self._sel_generation
+        self._stop_spinner()
+        label = self.query_one(f"#{self.side}-sel", Static)
+        if not self.marked:
+            label.update("")
+            return
+        dirs = [p for p in self.marked if os.path.isdir(p) and not os.path.islink(p)]
+        files_total = 0
+        for path in self.marked:
+            if path not in dirs:
+                try:
+                    files_total += os.path.getsize(path)
+                except OSError:
+                    pass
+        text = f"{len(self.marked)} marked  "
+        if not dirs:
+            label.update(text + _format_bytes(files_total))
+            return
+        frame = 0
+
+        def spin() -> None:
+            nonlocal frame
+            label.update(text + f"{_format_bytes(files_total)} + folders {SPINNER_FRAMES[frame % 4]}")
+            frame += 1
+
+        spin()
+        self._spinner = self.set_interval(0.12, spin)
+
+        def work() -> None:
+            total = files_total + sum(path_size(d) for d in dirs)
+            self.app.call_from_thread(done, total)
+
+        def done(total: int) -> None:
+            if generation == self._sel_generation and self.is_mounted:
+                self._stop_spinner()
+                label.update(text + _format_bytes(total))
+
+        self.run_worker(work, thread=True)
+
+    def move_cursor_to(self, name: str) -> None:
+        """Put the cursor on `name` (e.g. after a rename); no-op if absent."""
+        for index, (row_name, _) in enumerate(self._rows):
+            if row_name == name:
+                self.query_one(f"#{self.side}-table", DataTable).move_cursor(row=index)
+                return
 
     def selected_name(self) -> str | None:
         table = self.query_one(f"#{self.side}-table", DataTable)
@@ -123,6 +211,7 @@ class FilePanel(Vertical):
         # top -- annoying when marking several items in a row.
         table = self.query_one(f"#{self.side}-table", DataTable)
         table.update_cell_at(table.cursor_coordinate._replace(column=0), mark)
+        self.update_selection()
 
     def marked_or_selected(self) -> list[str]:
         """What an action should operate on: the marked set if non-empty,
@@ -139,16 +228,36 @@ class FnButton(Button, can_focus=False):
     """A clickable key hint. Never takes focus, so the file list keeps it."""
 
 
-class FunctionBar(Horizontal):
-    """The bottom row of boxed key hints (replaces the one-line Footer): each
-    box shows the key and runs the same action when clicked."""
+class ActionBar(Horizontal):
+    """A row of boxed key hints (replaces the one-line Footer): each box shows
+    the key and runs the same action on the current screen when clicked."""
 
+    KEYS: list[tuple[str, str, str]] = []  # (key, label, action)
+    PREFIX = "fn"  # button ids are PREFIX-<n>; unique per bar on a screen
+
+    @classmethod
+    def needed_width(cls) -> int:
+        """Columns the boxes take side by side: label plus 2 border and 2 padding cells."""
+        return sum(len(f"{key} {label}") + 4 for key, label, _ in cls.KEYS)
+
+    def compose(self) -> ComposeResult:
+        for i, (key, label, action) in enumerate(self.KEYS):
+            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"{self.PREFIX}-{i}")
+            button.action_name = action
+            yield button
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.screen.run_worker(self.screen.run_action(event.button.action_name))
+
+
+class MainTopBar(ActionBar):
+    """Main screen's upper bottom row: panes, views and tools (sits right
+    above the file-operation row so all hints live in one place)."""
+
+    PREFIX = "tb"
     KEYS = [
         ("Tab", "Pane", "switch_pane"),
-        ("F5", "Copy", "copy"),
-        ("F6", "Move", "move"),
-        ("F7", "MkDir", "make_dir"),
-        ("F8", "Delete", "delete"),
         ("c", "Compare", "show_compare"),
         ("p", "Places", "show_places"),
         ("r", "Refresh", "refresh_both"),
@@ -157,12 +266,28 @@ class FunctionBar(Horizontal):
         ("q", "Quit", "app.quit"),
     ]
 
-    def compose(self) -> ComposeResult:
-        for i, (key, label, action) in enumerate(self.KEYS):
-            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"fn-{i}")
-            button.action_name = action
-            yield button
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        event.stop()
-        self.screen.run_worker(self.screen.run_action(event.button.action_name))
+class FunctionBar(ActionBar):
+    """Main screen's bottom bar: the classic file-operation keys."""
+
+    PREFIX = "fb"
+    KEYS = [
+        ("F2", "Rename", "rename"),
+        ("F5", "Copy", "copy"),
+        ("F6", "Move", "move"),
+        ("F7", "MkDir", "make_dir"),
+        ("F8", "Delete", "delete"),
+    ]
+
+
+class CompareBar(ActionBar):
+    """Compare screen's bottom bar."""
+
+    KEYS = [
+        ("Esc", "Back", "back"),
+        ("m", "Mirror →", "mirror"),
+        ("u", "Update →", "update"),
+        ("b", "Two-way", "two_way"),
+        ("Space", "Mark", "toggle_manual"),
+        ("c", "Copy marked →", "copy_manual"),
+    ]

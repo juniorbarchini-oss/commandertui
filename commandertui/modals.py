@@ -7,7 +7,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, OptionList, Static
+from textual.widgets import Button, DataTable, Input, OptionList, Static
 
 from .bookmarks import Place, all_places, remove_bookmark
 from .models import OpKind, OperationQueue
@@ -210,42 +210,67 @@ class PlacesScreen(ModalScreen[str | None]):
 
 
 class InputScreen(ModalScreen[str | None]):
-    """A single text prompt (e.g. new folder name). Enter confirms with the
-    current text, Escape cancels with None -- same shape as ConfirmScreen so
-    callers can use the same push_screen(..., callback) pattern."""
+    """A single text prompt (e.g. new folder name). Enter or the OK button
+    confirms with the current text, Escape or Cancel dismisses with None --
+    same shape as ConfirmScreen so callers can use the same
+    push_screen(..., callback) pattern."""
 
     DEFAULT_CSS = """
     InputScreen {
         align: center middle;
     }
     #input-box {
-        width: 60;
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
         height: auto;
-        border: solid $foreground;
-        padding: 1 2;
+        border: heavy $foreground;
+        padding: 1 3;
     }
-    #input-box Static {
+    #input-prompt {
+        text-style: bold;
         margin-bottom: 1;
+    }
+    #input-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #input-buttons Button {
+        min-width: 18;
+        margin: 0 2;
     }
     """
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
 
-    def __init__(self, prompt: str) -> None:
+    def __init__(self, prompt: str, initial: str = "") -> None:
         super().__init__()
         self.prompt = prompt
+        self.initial = initial
 
     def compose(self) -> ComposeResult:
         with Vertical(id="input-box"):
-            yield Static(self.prompt)
-            yield Input(id="input-field")
-        yield Footer()
+            yield Static(self.prompt, id="input-prompt")
+            yield Input(value=self.initial, id="input-field")
+            with Horizontal(id="input-buttons"):
+                yield Button("OK  (Enter)", id="ok")
+                yield Button("Cancel  (Esc)", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
 
+    def _submit(self) -> None:
+        self.dismiss(self.query_one(Input).value.strip() or None)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value.strip() or None)
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self._submit()
+        else:
+            self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -261,10 +286,20 @@ class SizeScreen(ModalScreen[None]):
         align: center middle;
     }
     #size-box {
-        width: 60;
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
         height: auto;
-        border: solid $foreground;
-        padding: 1 2;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #size-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #size-buttons Button {
+        min-width: 18;
     }
     """
 
@@ -282,7 +317,11 @@ class SizeScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="size-box"):
             yield Static(f"{self.label}\n\n  Calculating...", id="size-text")
-        yield Footer()
+            with Horizontal(id="size-buttons"):
+                yield Button("Close  (Esc)", id="close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.action_close()
 
     def on_mount(self) -> None:
         self.run_worker(self._work, thread=True)
@@ -324,10 +363,20 @@ class MessageScreen(ModalScreen[None]):
         align: center middle;
     }
     #msg-box {
-        width: 60;
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
         height: auto;
-        border: solid $error;
-        padding: 1 2;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #msg-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #msg-buttons Button {
+        min-width: 18;
     }
     """
 
@@ -343,7 +392,14 @@ class MessageScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="msg-box"):
             yield Static(self.text)
-        yield Footer()
+            with Horizontal(id="msg-buttons"):
+                yield Button("OK  (Enter)", id="ok")
+
+    def on_mount(self) -> None:
+        self.query_one("#ok", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.action_close()
 
     def action_close(self) -> None:
         self.dismiss(None)

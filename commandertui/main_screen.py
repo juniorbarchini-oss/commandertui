@@ -14,7 +14,7 @@ from .modals import ADD_NETWORK, ChoiceScreen, InputScreen, MessageScreen, Place
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
-from .widgets import FilePanel, FunctionBar
+from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
 
 
 class MainScreen(Screen):
@@ -36,6 +36,7 @@ class MainScreen(Screen):
         Binding("enter", "enter_dir", "Open", priority=True),
         Binding("backspace", "up_dir", "Up", priority=True),
         Binding("space", "toggle_mark", "Mark", priority=True),
+        Binding("f2", "rename", "Rename", priority=True),
         Binding("f5", "copy", "Copy", priority=True),
         Binding("f6", "move", "Move", priority=True),
         Binding("f7", "make_dir", "MkDir", priority=True),
@@ -63,10 +64,25 @@ class MainScreen(Screen):
         with Horizontal():
             yield FilePanel(self.left_path, side="left", id="panel-left")
             yield FilePanel(self.right_path, side="right", id="panel-right")
-        yield FunctionBar()
+        with Horizontal(id="bars"):
+            yield MainTopBar()
+            yield FunctionBar()
 
     def on_mount(self) -> None:
         self._set_active("left")
+        self._layout_bars()
+
+    def on_resize(self, event) -> None:
+        self._layout_bars()
+
+    def _layout_bars(self) -> None:
+        """One row of key boxes when the window is wide enough, two stacked
+        rows (tools above, F-keys below) when it is not."""
+        needed = MainTopBar.needed_width() + FunctionBar.needed_width() + 2
+        wide = self.size.width >= needed
+        bars = self.query_one("#bars")
+        bars.set_class(wide, "wide")
+        bars.set_class(not wide, "narrow")
 
     # ------------------------------------------------------------ helpers
     def _panel(self, side: str) -> FilePanel:
@@ -144,6 +160,38 @@ class MainScreen(Screen):
         self.app.push_screen(InputScreen("New folder name:"), on_named)
 
     # --------------------------------------------------------- op queues
+    def action_rename(self) -> None:
+        panel = self._active_panel()
+        name = panel.selected_name()
+        if not name or name == PARENT_MARK:
+            self._nothing_selected()
+            return
+
+        def on_named(new_name: str | None) -> None:
+            if not new_name or new_name == name:
+                return
+            if "/" in new_name or new_name in (".", ".."):
+                self.app.push_screen(MessageScreen(f'"{new_name}" is not a valid name.'))
+                return
+            src = os.path.join(panel.path, name)
+            dst = os.path.join(panel.path, new_name)
+            # os.rename (not os.replace): never silently overwrite another item.
+            if os.path.lexists(dst):
+                self.app.push_screen(MessageScreen(f'"{new_name}" already exists here.'))
+                return
+            try:
+                os.rename(src, dst)
+            except OSError as e:
+                self.app.push_screen(MessageScreen(f"Could not rename:\n{e}"))
+                return
+            if src in panel.marked:
+                panel.marked.discard(src)
+                panel.marked.add(dst)
+            panel.refresh_listing()
+            panel.move_cursor_to(new_name)
+
+        self.app.push_screen(InputScreen("Rename to:", initial=name), on_named)
+
     def action_copy(self) -> None:
         self._run_marked_op(OpKind.COPY, "Copy")
 

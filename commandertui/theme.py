@@ -82,12 +82,6 @@ DataTable > .datatable--even-row {{
     background: {p['background']};
 }}
 
-PlacesScreen #places-box, ChoiceScreen #choice-box {{
-    background: {p['background']};
-    color: {p['foreground']};
-    border: heavy {p['foreground']};
-}}
-
 ConfirmScreen #confirm-box {{
     background: {p['background']};
     color: {p['foreground']};
@@ -99,7 +93,7 @@ ConfirmScreen #confirm-box.danger {{
     border: heavy {p['danger']};
 }}
 
-ConfirmScreen Button, ProgressScreen Button, PlacesScreen Button, ChoiceScreen Button {{
+ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button {{
     background: {p['background']};
     color: {p['foreground']};
     border: tall {p['foreground']};
@@ -111,7 +105,7 @@ ConfirmScreen Button.danger, ProgressScreen Button.danger {{
     border: tall {p['danger']};
 }}
 
-ConfirmScreen Button:focus, ProgressScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus {{
+ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus {{
     background: {p['foreground']};
     color: {p['background']};
     text-style: bold;
@@ -120,6 +114,38 @@ ConfirmScreen Button:focus, ProgressScreen Button:focus, PlacesScreen Button:foc
 ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
     background: {p['danger']};
     color: {p['background']};
+}}
+
+MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
+InputScreen #input-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
+InputScreen Input {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: tall {p['dim']};
+}}
+
+InputScreen Input:focus {{
+    border: tall {p['foreground']};
+}}
+
+InputScreen Input > .input--cursor {{
+    background: {p['foreground']};
+    color: {p['background']};
+}}
+
+InputScreen Input > .input--selection {{
+    background: {p['dim']};
+    color: {p['foreground']};
 }}
 
 ChoiceScreen OptionList {{
@@ -151,7 +177,33 @@ DataTable:blur > .datatable--cursor {{
     color: {p['background']};
 }}
 
-FunctionBar {{
+CompareBar {{
+    dock: bottom;
+}}
+
+#bars {{
+    height: auto;
+}}
+
+#bars.wide {{
+    layout: horizontal;
+    height: 3;
+}}
+
+#bars.narrow {{
+    layout: vertical;
+    height: 6;
+}}
+
+#bars.wide MainTopBar, #bars.wide FunctionBar {{
+    width: auto;
+}}
+
+#bars.narrow MainTopBar, #bars.narrow FunctionBar {{
+    width: 100%;
+}}
+
+MainTopBar, FunctionBar, CompareBar {{
     height: 3;
     background: {p['background']};
 }}
@@ -170,6 +222,19 @@ FnButton {{
 FnButton:hover {{
     background: {p['foreground']};
     color: {p['background']};
+}}
+
+.pathrow {{
+    height: 1;
+}}
+
+.pathrow .pathbar {{
+    width: 1fr;
+}}
+
+.pathrow .pathfree, .pathrow .pathsel {{
+    width: auto;
+    padding: 0 2;
 }}
 
 .pathbar {{
