@@ -185,7 +185,8 @@ class ActionBar(Horizontal):
 
 
 class MainTopBar(ActionBar):
-    """Main screen's top bar: panes, views and tools."""
+    """Main screen's upper bottom row: panes, views and tools (sits right
+    above the file-operation row so all hints live in one place)."""
 
     PREFIX = "tb"
     KEYS = [

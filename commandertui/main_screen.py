@@ -60,10 +60,10 @@ class MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield MainTopBar()
         with Horizontal():
             yield FilePanel(self.left_path, side="left", id="panel-left")
             yield FilePanel(self.right_path, side="right", id="panel-right")
+        yield MainTopBar()
         yield FunctionBar()
 
     def on_mount(self) -> None:
