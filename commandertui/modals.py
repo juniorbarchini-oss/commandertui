@@ -7,7 +7,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, OptionList, Static
+from textual.widgets import Button, DataTable, Input, OptionList, Static
 
 from .bookmarks import Place, all_places, remove_bookmark
 from .models import OpKind, OperationQueue
