@@ -416,3 +416,28 @@ async def test_selection_counter_clears_after_the_marks_are_gone(tmp_path):
         app._panel("left").refresh_listing()
         await pilot.pause()
         assert str(label.render()).strip() == ""
+
+
+@pytest.mark.asyncio
+async def test_selection_counter_spins_while_folders_are_counted(tmp_path, monkeypatch):
+    import threading
+
+    from commandertui import widgets
+
+    release = threading.Event()
+    monkeypatch.setattr(widgets, "path_size", lambda p: (release.wait(5), 4096)[1])
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "dir").mkdir()
+    async with app.run_test(size=(150, 30)) as pilot:
+        await _skip_boot(pilot)
+        label = app._panel("left").query_one("#left-sel")
+        await pilot.press("down", "space")  # marks dir/ -> slow count starts
+        seen = set()
+        for _ in range(6):
+            await pilot.pause(0.15)
+            seen.add(str(label.render()).strip()[-1])
+        assert len(seen & set(widgets.SPINNER_FRAMES)) >= 2  # the frame keeps changing
+        release.set()
+        await pilot.pause(0.5)
+        final = str(label.render())
+        assert "4.0 KB" in final and not final.rstrip().endswith(tuple(widgets.SPINNER_FRAMES))

@@ -12,6 +12,7 @@ from textual.widgets import Button, DataTable, Static
 from .scanner import path_size
 
 PARENT_MARK = ".."
+SPINNER_FRAMES = "|/-\\"
 
 
 def _human_size(n: int) -> str:
@@ -60,6 +61,7 @@ class FilePanel(Vertical):
         self.path = os.path.abspath(start_path)
         self._rows: list[tuple[str, bool]] = []  # (name, is_dir), in display order
         self._sel_generation = 0  # lets a stale background size count be ignored
+        self._spinner = None  # Timer animating the label while folders are counted
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="pathrow"):
@@ -114,6 +116,11 @@ class FilePanel(Vertical):
         self.query_one(f"#{self.side}-free", Static).update(_free_space_label(self.path))
         self.update_selection()
 
+    def _stop_spinner(self) -> None:
+        if self._spinner is not None:
+            self._spinner.stop()
+            self._spinner = None
+
     def update_selection(self) -> None:
         """"4 marked  1.2 GB" in the path row, so the volume is known before
         pressing F5/F8. Folder sizes are counted in a worker (a big tree or a
@@ -121,6 +128,7 @@ class FilePanel(Vertical):
         total meanwhile."""
         self._sel_generation += 1
         generation = self._sel_generation
+        self._stop_spinner()
         label = self.query_one(f"#{self.side}-sel", Static)
         if not self.marked:
             label.update("")
@@ -137,7 +145,15 @@ class FilePanel(Vertical):
         if not dirs:
             label.update(text + _format_bytes(files_total))
             return
-        label.update(text + f"{_format_bytes(files_total)} + folders...")
+        frame = 0
+
+        def spin() -> None:
+            nonlocal frame
+            label.update(text + f"{_format_bytes(files_total)} + folders {SPINNER_FRAMES[frame % 4]}")
+            frame += 1
+
+        spin()
+        self._spinner = self.set_interval(0.12, spin)
 
         def work() -> None:
             total = files_total + sum(path_size(d) for d in dirs)
@@ -145,6 +161,7 @@ class FilePanel(Vertical):
 
         def done(total: int) -> None:
             if generation == self._sel_generation and self.is_mounted:
+                self._stop_spinner()
                 label.update(text + _format_bytes(total))
 
         self.run_worker(work, thread=True)
