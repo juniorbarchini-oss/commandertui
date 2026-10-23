@@ -82,6 +82,12 @@ DataTable > .datatable--even-row {{
     background: {p['background']};
 }}
 
+PlacesScreen #places-box, ChoiceScreen #choice-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
 ConfirmScreen #confirm-box {{
     background: {p['background']};
     color: {p['foreground']};
@@ -93,7 +99,7 @@ ConfirmScreen #confirm-box.danger {{
     border: heavy {p['danger']};
 }}
 
-ConfirmScreen Button, ProgressScreen Button {{
+ConfirmScreen Button, ProgressScreen Button, PlacesScreen Button, ChoiceScreen Button {{
     background: {p['background']};
     color: {p['foreground']};
     border: tall {p['foreground']};
@@ -105,7 +111,7 @@ ConfirmScreen Button.danger, ProgressScreen Button.danger {{
     border: tall {p['danger']};
 }}
 
-ConfirmScreen Button:focus, ProgressScreen Button:focus {{
+ConfirmScreen Button:focus, ProgressScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus {{
     background: {p['foreground']};
     color: {p['background']};
     text-style: bold;
@@ -114,6 +120,22 @@ ConfirmScreen Button:focus, ProgressScreen Button:focus {{
 ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
     background: {p['danger']};
     color: {p['background']};
+}}
+
+ChoiceScreen OptionList {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: tall {p['dim']};
+}}
+
+ChoiceScreen OptionList:focus {{
+    border: tall {p['foreground']};
+}}
+
+ChoiceScreen OptionList > .option-list--option-highlighted {{
+    background: {p['foreground']};
+    color: {p['background']};
+    text-style: bold;
 }}
 
 FilePanel {{

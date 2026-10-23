@@ -128,3 +128,22 @@ def test_cancelled_move_keeps_source(tmp_path, monkeypatch):
 
     assert result.cancelled
     assert src.read_text() == "data"
+
+
+def test_copy_survives_destination_without_chmod_support(tmp_path, monkeypatch):
+    import errno
+    import shutil
+
+    from commandertui import sync
+
+    src = tmp_path / "a.bin"
+    src.write_bytes(b"data")
+
+    def no_chmod(*a, **k):
+        raise OSError(errno.ENOTSUP, "Operation not supported")
+
+    monkeypatch.setattr(shutil, "copystat", no_chmod)
+    result = sync.copy_item(str(src), str(tmp_path / "out" / "a.bin"))
+
+    assert result.ok
+    assert (tmp_path / "out" / "a.bin").read_bytes() == b"data"

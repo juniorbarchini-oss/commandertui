@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import shutil
@@ -22,6 +23,16 @@ class TransferResult:
     ok: bool
     error: str | None = None
     cancelled: bool = False
+
+
+def _copystat(src: str, dst: str) -> None:
+    """shutil.copystat, tolerating destinations with no permission support
+    (GVFS/SMB, FAT...): mtime is applied first, so only chmod/xattr are lost."""
+    try:
+        shutil.copystat(src, dst, follow_symlinks=False)
+    except OSError as e:
+        if e.errno not in (errno.ENOTSUP, errno.EPERM, errno.ENOSYS):
+            raise
 
 
 def _atomic_copy_file(
@@ -56,7 +67,7 @@ def _atomic_copy_file(
                 done += len(chunk)
                 if progress:
                     progress(done, total, name)
-        shutil.copystat(src, tmp_path, follow_symlinks=False)
+        _copystat(src, tmp_path)
         os.replace(tmp_path, dst)
     except BaseException:
         if os.path.exists(tmp_path):
@@ -84,7 +95,7 @@ def copy_item(
                 sub_result = copy_item(entry.path, os.path.join(dst, entry.name), progress, cancel_check)
                 if not sub_result.ok:
                     return sub_result
-            shutil.copystat(src, dst, follow_symlinks=False)
+            _copystat(src, dst)
         else:
             _atomic_copy_file(src, dst, progress, cancel_check)
         return TransferResult(ok=True)

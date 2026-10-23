@@ -7,10 +7,11 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Static
+from textual.widgets import Button, DataTable, Footer, Input, OptionList, Static
 
-from .bookmarks import Place, all_places
+from .bookmarks import Place, all_places, remove_bookmark
 from .models import OpKind, OperationQueue
+from .netlocations import remove_location
 from .scanner import tree_stats
 
 
@@ -114,6 +115,9 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+ADD_NETWORK = "\0add-network"  # sentinel PlacesScreen dismisses with to start the add-network flow
+
+
 class PlacesScreen(ModalScreen[str | None]):
     """Quick-jump to a mounted drive (USB/SMB/local) or a saved bookmark,
     instead of typing the path."""
@@ -123,27 +127,80 @@ class PlacesScreen(ModalScreen[str | None]):
         align: center middle;
     }
     #places-box {
-        width: 70;
+        width: 90%;
+        max-width: 120;
         height: auto;
-        max-height: 20;
-        border: solid $foreground;
+        max-height: 90%;
+        border: heavy $foreground;
+        padding: 1 2;
+    }
+    #places-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #places-table {
+        height: auto;
+        max-height: 16;
+    }
+    #places-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #places-buttons Button {
+        min-width: 20;
+        margin: 0 1;
     }
     """
 
-    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+    BINDINGS = [
+        Binding("a", "add_network", "Add network", priority=True),
+        Binding("d", "delete_saved", "Delete saved", priority=True),
+        Binding("escape", "cancel", "Cancel", priority=True),
+    ]
 
     def compose(self) -> ComposeResult:
         table = DataTable(id="places-table", cursor_type="row")
         table.add_columns("Kind", "Label", "Path")
         with Vertical(id="places-box"):
+            yield Static("Places", id="places-title")
             yield table
-        yield Footer()
+            with Horizontal(id="places-buttons"):
+                yield Button("Add network  (a)", id="add")
+                yield Button("Delete saved  (d)", id="delete")
+                yield Button("Close  (Esc)", id="close")
 
     def on_mount(self) -> None:
+        self._fill()
+
+    def _fill(self) -> None:
         table = self.query_one("#places-table", DataTable)
+        table.clear()
         self.places: list[Place] = all_places()
         for place in self.places:
             table.add_row(place.kind, place.label, place.path, key=place.path)
+
+    def action_add_network(self) -> None:
+        self.dismiss(ADD_NETWORK)
+
+    def action_delete_saved(self) -> None:
+        table = self.query_one("#places-table", DataTable)
+        if not self.places or table.cursor_row >= len(self.places):
+            return
+        place = self.places[table.cursor_row]
+        if place.kind == "net-saved":
+            remove_location(place.path)
+        elif place.kind == "saved":
+            remove_bookmark(place.path)
+        else:
+            self.notify("Only saved places can be deleted.", severity="warning")
+            return
+        self._fill()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        {"add": self.action_add_network, "delete": self.action_delete_saved}.get(
+            event.button.id, self.action_cancel
+        )()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self.dismiss(str(event.row_key.value))
@@ -289,4 +346,62 @@ class MessageScreen(ModalScreen[None]):
         yield Footer()
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class ChoiceScreen(ModalScreen[str | None]):
+    """Pick one item from a short list; Escape cancels with None."""
+
+    DEFAULT_CSS = """
+    ChoiceScreen {
+        align: center middle;
+    }
+    #choice-box {
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
+        height: auto;
+        max-height: 90%;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #choice-prompt {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #choice-list {
+        height: auto;
+        max-height: 14;
+    }
+    #choice-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #choice-buttons Button {
+        min-width: 18;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def __init__(self, prompt: str, options: list[str]) -> None:
+        super().__init__()
+        self.prompt = prompt
+        self.options = options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="choice-box"):
+            yield Static(self.prompt, id="choice-prompt")
+            yield OptionList(*self.options, id="choice-list")
+            with Horizontal(id="choice-buttons"):
+                yield Button("Cancel  (Esc)", id="cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(self.options[event.option_index])
+
+    def action_cancel(self) -> None:
         self.dismiss(None)
