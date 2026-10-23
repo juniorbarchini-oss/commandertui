@@ -4,9 +4,9 @@ import os
 from datetime import datetime
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import DataTable, Static
+from textual.widgets import Button, DataTable, Static
 
 PARENT_MARK = ".."
 
@@ -48,6 +48,7 @@ class FilePanel(Vertical):
     def watch_active(self, active: bool) -> None:
         bar = self.query_one(f"#{self.side}-pathbar", Static)
         bar.set_class(active, "active")
+        self.set_class(active, "active-panel")
 
     def refresh_listing(self) -> None:
         table = self.query_one(f"#{self.side}-table", DataTable)
@@ -132,3 +133,36 @@ class FilePanel(Vertical):
         if name and name != PARENT_MARK:
             return [os.path.join(self.path, name)]
         return []
+
+
+class FnButton(Button, can_focus=False):
+    """A clickable key hint. Never takes focus, so the file list keeps it."""
+
+
+class FunctionBar(Horizontal):
+    """The bottom row of boxed key hints (replaces the one-line Footer): each
+    box shows the key and runs the same action when clicked."""
+
+    KEYS = [
+        ("Tab", "Pane", "switch_pane"),
+        ("F5", "Copy", "copy"),
+        ("F6", "Move", "move"),
+        ("F7", "MkDir", "make_dir"),
+        ("F8", "Delete", "delete"),
+        ("c", "Compare", "show_compare"),
+        ("p", "Places", "show_places"),
+        ("r", "Refresh", "refresh_both"),
+        ("h", "Hidden", "toggle_hidden"),
+        ("i", "Size", "show_size"),
+        ("q", "Quit", "app.quit"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        for i, (key, label, action) in enumerate(self.KEYS):
+            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"fn-{i}")
+            button.action_name = action
+            yield button
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.screen.run_worker(self.screen.run_action(event.button.action_name))
