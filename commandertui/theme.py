@@ -216,8 +216,9 @@ FnButton:hover {{
     width: 1fr;
 }}
 
-.pathrow .pathfree {{
+.pathrow .pathfree, .pathrow .pathsel {{
     width: auto;
+    padding: 0 2;
 }}
 
 .pathbar {{

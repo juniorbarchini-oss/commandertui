@@ -380,3 +380,39 @@ async def test_bars_never_overflow_at_any_width(tmp_path, width):
         await _skip_boot(pilot)
         await pilot.pause()
         assert all(b.region.right <= width for b in app.screen.query("FnButton"))
+
+
+@pytest.mark.asyncio
+async def test_selection_counter_counts_files_and_folder_sizes(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    (left / "a.txt").write_text("x" * 1000)
+    (left / "dir").mkdir()
+    (left / "dir" / "big.bin").write_bytes(b"y" * 5000)
+    async with app.run_test(size=(150, 30)) as pilot:
+        await _skip_boot(pilot)
+        label = app._panel("left").query_one("#left-sel")
+        assert str(label.render()).strip() == ""
+        # rows: "..", dir/, a.txt (folders sort first)
+        await pilot.press("down", "space", "down", "space")
+        await pilot.pause(0.5)
+        text = str(label.render())
+        assert "2 marked" in text and "5.9 KB" in text
+        await pilot.press("space")  # unmark a.txt
+        await pilot.pause(0.5)
+        assert "1 marked" in str(label.render()) and "4.9 KB" in str(label.render())
+
+
+@pytest.mark.asyncio
+async def test_selection_counter_clears_after_the_marks_are_gone(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(150, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("down", "space")
+        await pilot.pause()
+        label = app._panel("left").query_one("#left-sel")
+        assert "1 marked" in str(label.render())
+        await pilot.press("r")  # refresh keeps marks; navigating clears them
+        app._panel("left").marked.clear()
+        app._panel("left").refresh_listing()
+        await pilot.pause()
+        assert str(label.render()).strip() == ""

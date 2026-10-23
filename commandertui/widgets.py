@@ -9,6 +9,8 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Button, DataTable, Static
 
+from .scanner import path_size
+
 PARENT_MARK = ".."
 
 
@@ -21,6 +23,15 @@ def _human_size(n: int) -> str:
     return f"{size:.1f}T"
 
 
+def _format_bytes(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 def _free_space_label(path: str) -> str:
     """"48.2 GB free" for the filesystem under `path`, or "" if it can't say
     (permission, vanished mount, FUSE that reports nothing)."""
@@ -30,12 +41,7 @@ def _free_space_label(path: str) -> str:
         return ""
     if usage.total <= 0:
         return ""
-    size = float(usage.free)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024 or unit == "TB":
-            return f"{size:.1f} {unit} free"
-        size /= 1024
-    return ""
+    return f"{_format_bytes(usage.free)} free"
 
 
 class FilePanel(Vertical):
@@ -53,10 +59,12 @@ class FilePanel(Vertical):
         self.marked: set[str] = set()
         self.path = os.path.abspath(start_path)
         self._rows: list[tuple[str, bool]] = []  # (name, is_dir), in display order
+        self._sel_generation = 0  # lets a stale background size count be ignored
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="pathrow"):
             yield Static(self.path, id=f"{self.side}-pathbar", classes="pathbar")
+            yield Static("", id=f"{self.side}-sel", classes="pathbar pathsel")
             yield Static("", id=f"{self.side}-free", classes="pathbar pathfree")
         table = DataTable(id=f"{self.side}-table", cursor_type="row")
         table.add_columns(" ", "Name", "Size", "Modified")
@@ -66,7 +74,7 @@ class FilePanel(Vertical):
         self.refresh_listing()
 
     def watch_active(self, active: bool) -> None:
-        for suffix in ("pathbar", "free"):
+        for suffix in ("pathbar", "sel", "free"):
             self.query_one(f"#{self.side}-{suffix}", Static).set_class(active, "active")
         self.set_class(active, "active-panel")
 
@@ -104,6 +112,42 @@ class FilePanel(Vertical):
 
         self.query_one(f"#{self.side}-pathbar", Static).update(self.path)
         self.query_one(f"#{self.side}-free", Static).update(_free_space_label(self.path))
+        self.update_selection()
+
+    def update_selection(self) -> None:
+        """"4 marked  1.2 GB" in the path row, so the volume is known before
+        pressing F5/F8. Folder sizes are counted in a worker (a big tree or a
+        network share must not freeze the UI); the label shows the files'
+        total meanwhile."""
+        self._sel_generation += 1
+        generation = self._sel_generation
+        label = self.query_one(f"#{self.side}-sel", Static)
+        if not self.marked:
+            label.update("")
+            return
+        dirs = [p for p in self.marked if os.path.isdir(p) and not os.path.islink(p)]
+        files_total = 0
+        for path in self.marked:
+            if path not in dirs:
+                try:
+                    files_total += os.path.getsize(path)
+                except OSError:
+                    pass
+        text = f"{len(self.marked)} marked  "
+        if not dirs:
+            label.update(text + _format_bytes(files_total))
+            return
+        label.update(text + f"{_format_bytes(files_total)} + folders...")
+
+        def work() -> None:
+            total = files_total + sum(path_size(d) for d in dirs)
+            self.app.call_from_thread(done, total)
+
+        def done(total: int) -> None:
+            if generation == self._sel_generation and self.is_mounted:
+                label.update(text + _format_bytes(total))
+
+        self.run_worker(work, thread=True)
 
     def move_cursor_to(self, name: str) -> None:
         """Put the cursor on `name` (e.g. after a rename); no-op if absent."""
@@ -150,6 +194,7 @@ class FilePanel(Vertical):
         # top -- annoying when marking several items in a row.
         table = self.query_one(f"#{self.side}-table", DataTable)
         table.update_cell_at(table.cursor_coordinate._replace(column=0), mark)
+        self.update_selection()
 
     def marked_or_selected(self) -> list[str]:
         """What an action should operate on: the marked set if non-empty,
