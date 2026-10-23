@@ -345,3 +345,13 @@ async def test_compare_bar_back_button(tmp_path):
         await pilot.click("#fn-0")  # Esc Back
         await pilot.pause()
         assert app.screen.__class__.__name__ == "MainScreen"
+
+
+@pytest.mark.asyncio
+async def test_main_bars_fit_in_100_columns(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _skip_boot(pilot)
+        buttons = list(app.screen.query("FnButton"))
+        assert len(buttons) == 12
+        assert all(b.region.right <= 100 for b in buttons)

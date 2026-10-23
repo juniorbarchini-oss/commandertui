@@ -165,7 +165,7 @@ CompareBar {{
     dock: bottom;
 }}
 
-FunctionBar, CompareBar {{
+MainTopBar, FunctionBar, CompareBar {{
     height: 3;
     background: {p['background']};
 }}

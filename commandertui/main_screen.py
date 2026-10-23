@@ -13,7 +13,7 @@ from .modals import InputScreen, MessageScreen, PlacesScreen, SizeScreen
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
-from .widgets import PARENT_MARK, FilePanel, FunctionBar
+from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
 
 
 class MainScreen(Screen):
@@ -60,6 +60,7 @@ class MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield MainTopBar()
         with Horizontal():
             yield FilePanel(self.left_path, side="left", id="panel-left")
             yield FilePanel(self.right_path, side="right", id="panel-right")

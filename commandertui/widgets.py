@@ -171,10 +171,11 @@ class ActionBar(Horizontal):
     the key and runs the same action on the current screen when clicked."""
 
     KEYS: list[tuple[str, str, str]] = []  # (key, label, action)
+    PREFIX = "fn"  # button ids are PREFIX-<n>; unique per bar on a screen
 
     def compose(self) -> ComposeResult:
         for i, (key, label, action) in enumerate(self.KEYS):
-            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"fn-{i}")
+            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"{self.PREFIX}-{i}")
             button.action_name = action
             yield button
 
@@ -183,22 +184,31 @@ class ActionBar(Horizontal):
         self.screen.run_worker(self.screen.run_action(event.button.action_name))
 
 
-class FunctionBar(ActionBar):
-    """Main screen's bottom bar."""
+class MainTopBar(ActionBar):
+    """Main screen's top bar: panes, views and tools."""
 
+    PREFIX = "tb"
     KEYS = [
         ("Tab", "Pane", "switch_pane"),
-        ("F2", "Rename", "rename"),
-        ("F5", "Copy", "copy"),
-        ("F6", "Move", "move"),
-        ("F7", "MkDir", "make_dir"),
-        ("F8", "Delete", "delete"),
         ("c", "Compare", "show_compare"),
         ("p", "Places", "show_places"),
         ("r", "Refresh", "refresh_both"),
         ("h", "Hidden", "toggle_hidden"),
         ("i", "Size", "show_size"),
         ("q", "Quit", "app.quit"),
+    ]
+
+
+class FunctionBar(ActionBar):
+    """Main screen's bottom bar: the classic file-operation keys."""
+
+    PREFIX = "fb"
+    KEYS = [
+        ("F2", "Rename", "rename"),
+        ("F5", "Copy", "copy"),
+        ("F6", "Move", "move"),
+        ("F7", "MkDir", "make_dir"),
+        ("F8", "Delete", "delete"),
     ]
 
 
