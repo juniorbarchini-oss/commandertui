@@ -31,6 +31,11 @@ Screen {{
     color: {p['foreground']};
 }}
 
+/* The filter bar floats over the panes so you watch the list shrink as you type. */
+FilterScreen {{
+    background: transparent;
+}}
+
 .dim {{
     color: {p['dim']};
 }}
@@ -93,7 +98,7 @@ ConfirmScreen #confirm-box.danger {{
     border: heavy {p['danger']};
 }}
 
-ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button {{
+ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FilterScreen Button {{
     background: {p['background']};
     color: {p['foreground']};
     border: tall {p['foreground']};
@@ -105,7 +110,7 @@ ConfirmScreen Button.danger, ProgressScreen Button.danger {{
     border: tall {p['danger']};
 }}
 
-ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus {{
+ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FilterScreen Button:focus {{
     background: {p['foreground']};
     color: {p['background']};
     text-style: bold;
@@ -116,7 +121,7 @@ ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
     color: {p['background']};
 }}
 
-MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box {{
+MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box, FilterScreen #filter-box {{
     background: {p['background']};
     color: {p['foreground']};
     border: heavy {p['foreground']};
@@ -128,22 +133,22 @@ InputScreen #input-box {{
     border: heavy {p['foreground']};
 }}
 
-InputScreen Input {{
+InputScreen Input, FilterScreen Input {{
     background: {p['background']};
     color: {p['foreground']};
     border: tall {p['dim']};
 }}
 
-InputScreen Input:focus {{
+InputScreen Input:focus, FilterScreen Input:focus {{
     border: tall {p['foreground']};
 }}
 
-InputScreen Input > .input--cursor {{
+InputScreen Input > .input--cursor, FilterScreen Input > .input--cursor {{
     background: {p['foreground']};
     color: {p['background']};
 }}
 
-InputScreen Input > .input--selection {{
+InputScreen Input > .input--selection, FilterScreen Input > .input--selection {{
     background: {p['dim']};
     color: {p['foreground']};
 }}

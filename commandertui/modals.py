@@ -486,3 +486,64 @@ class ChoiceScreen(ModalScreen[str | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class FilterScreen(ModalScreen[str | None]):
+    """Live name filter for a pane: the list behind shrinks as you type.
+    Enter (Apply) keeps the filter, Esc (Clear) removes it."""
+
+    DEFAULT_CSS = """
+    FilterScreen {
+        align: center bottom;
+    }
+    #filter-box {
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
+        height: auto;
+        border: heavy $foreground;
+        padding: 0 3;
+        margin-bottom: 8;
+    }
+    #filter-buttons {
+        height: 3;
+        align: center middle;
+    }
+    #filter-buttons Button {
+        min-width: 18;
+        margin: 0 2;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "clear", "Clear", priority=True)]
+
+    def __init__(self, initial: str, on_change) -> None:
+        super().__init__()
+        self.initial = initial
+        self.on_change = on_change
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="filter-box"):
+            yield Static("Filter by name (contains, ignores case):", id="filter-prompt")
+            yield Input(value=self.initial, id="filter-field")
+            with Horizontal(id="filter-buttons"):
+                yield Button("Apply  (Enter)", id="apply")
+                yield Button("Clear  (Esc)", id="clear")
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self.on_change(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "apply":
+            self.dismiss(self.query_one(Input).value)
+        else:
+            self.action_clear()
+
+    def action_clear(self) -> None:
+        self.dismiss(None)
