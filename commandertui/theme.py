@@ -93,7 +93,7 @@ ConfirmScreen #confirm-box.danger {{
     border: heavy {p['danger']};
 }}
 
-ConfirmScreen Button, ProgressScreen Button, InputScreen Button {{
+ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button {{
     background: {p['background']};
     color: {p['foreground']};
     border: tall {p['foreground']};
@@ -105,7 +105,7 @@ ConfirmScreen Button.danger, ProgressScreen Button.danger {{
     border: tall {p['danger']};
 }}
 
-ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus {{
+ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus {{
     background: {p['foreground']};
     color: {p['background']};
     text-style: bold;
@@ -114,6 +114,12 @@ ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focu
 ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
     background: {p['danger']};
     color: {p['background']};
+}}
+
+MessageScreen #msg-box, SizeScreen #size-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
 }}
 
 InputScreen #input-box {{
@@ -155,7 +161,11 @@ DataTable:blur > .datatable--cursor {{
     color: {p['background']};
 }}
 
-FunctionBar {{
+CompareBar {{
+    dock: bottom;
+}}
+
+FunctionBar, CompareBar {{
     height: 3;
     background: {p['background']};
 }}

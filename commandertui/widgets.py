@@ -166,9 +166,25 @@ class FnButton(Button, can_focus=False):
     """A clickable key hint. Never takes focus, so the file list keeps it."""
 
 
-class FunctionBar(Horizontal):
-    """The bottom row of boxed key hints (replaces the one-line Footer): each
-    box shows the key and runs the same action when clicked."""
+class ActionBar(Horizontal):
+    """A row of boxed key hints (replaces the one-line Footer): each box shows
+    the key and runs the same action on the current screen when clicked."""
+
+    KEYS: list[tuple[str, str, str]] = []  # (key, label, action)
+
+    def compose(self) -> ComposeResult:
+        for i, (key, label, action) in enumerate(self.KEYS):
+            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"fn-{i}")
+            button.action_name = action
+            yield button
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.screen.run_worker(self.screen.run_action(event.button.action_name))
+
+
+class FunctionBar(ActionBar):
+    """Main screen's bottom bar."""
 
     KEYS = [
         ("Tab", "Pane", "switch_pane"),
@@ -185,12 +201,15 @@ class FunctionBar(Horizontal):
         ("q", "Quit", "app.quit"),
     ]
 
-    def compose(self) -> ComposeResult:
-        for i, (key, label, action) in enumerate(self.KEYS):
-            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"fn-{i}")
-            button.action_name = action
-            yield button
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        event.stop()
-        self.screen.run_worker(self.screen.run_action(event.button.action_name))
+class CompareBar(ActionBar):
+    """Compare screen's bottom bar."""
+
+    KEYS = [
+        ("Esc", "Back", "back"),
+        ("m", "Mirror →", "mirror"),
+        ("u", "Update →", "update"),
+        ("b", "Two-way", "two_way"),
+        ("Space", "Mark", "toggle_manual"),
+        ("c", "Copy marked →", "copy_manual"),
+    ]

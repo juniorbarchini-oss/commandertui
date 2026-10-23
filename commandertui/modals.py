@@ -229,10 +229,20 @@ class SizeScreen(ModalScreen[None]):
         align: center middle;
     }
     #size-box {
-        width: 60;
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
         height: auto;
-        border: solid $foreground;
-        padding: 1 2;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #size-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #size-buttons Button {
+        min-width: 18;
     }
     """
 
@@ -250,7 +260,11 @@ class SizeScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="size-box"):
             yield Static(f"{self.label}\n\n  Calculating...", id="size-text")
-        yield Footer()
+            with Horizontal(id="size-buttons"):
+                yield Button("Close  (Esc)", id="close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.action_close()
 
     def on_mount(self) -> None:
         self.run_worker(self._work, thread=True)
@@ -292,10 +306,20 @@ class MessageScreen(ModalScreen[None]):
         align: center middle;
     }
     #msg-box {
-        width: 60;
+        width: 80%;
+        min-width: 50;
+        max-width: 90;
         height: auto;
-        border: solid $error;
-        padding: 1 2;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #msg-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #msg-buttons Button {
+        min-width: 18;
     }
     """
 
@@ -311,7 +335,14 @@ class MessageScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="msg-box"):
             yield Static(self.text)
-        yield Footer()
+            with Horizontal(id="msg-buttons"):
+                yield Button("OK  (Enter)", id="ok")
+
+    def on_mount(self) -> None:
+        self.query_one("#ok", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.action_close()
 
     def action_close(self) -> None:
         self.dismiss(None)

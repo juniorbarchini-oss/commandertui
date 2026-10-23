@@ -305,3 +305,43 @@ async def test_mkdir_dialog_cancel_button_creates_nothing(tmp_path):
         await pilot.pause()
         assert not isinstance(app.screen, ConfirmScreen) and app.screen.__class__.__name__ == "MainScreen"
     assert not (left / "newdir").exists()
+
+
+@pytest.mark.asyncio
+async def test_message_ok_button_closes(tmp_path):
+    from commandertui.modals import MessageScreen
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        app.push_screen(MessageScreen("Cancelled."))
+        await pilot.pause()
+        await pilot.click("#ok")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
+
+
+@pytest.mark.asyncio
+async def test_size_close_button_closes(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("down", "i")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "SizeScreen"
+        await pilot.click("#close")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
+
+
+@pytest.mark.asyncio
+async def test_compare_bar_back_button(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("c")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "CompareScreen"
+        await pilot.click("#fn-0")  # Esc Back
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "MainScreen"
