@@ -660,3 +660,102 @@ async def test_select_button_opens_the_menu(tmp_path):
         await pilot.click(f"#{button.id}")
         await pilot.pause()
         assert isinstance(app.screen, ChoiceScreen)
+
+
+def _enable_fake_update(monkeypatch, install="pipx", latest="9.9.9"):
+    from commandertui import updater
+
+    monkeypatch.delenv("COMMANDERTUI_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setenv("COMMANDERTUI_FAKE_LATEST", latest)
+    monkeypatch.setattr(updater, "detect_install", lambda: install)
+
+
+@pytest.mark.asyncio
+async def test_update_dialog_appears_after_the_boot_screen(tmp_path, monkeypatch):
+    from commandertui.modals import UpdateScreen
+
+    _enable_fake_update(monkeypatch)
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await pilot.pause(0.5)
+        assert app.update_info is None  # nothing is even looked up during the boot animation
+        assert not isinstance(app.screen, UpdateScreen)
+        await _skip_boot(pilot)
+        await pilot.pause(0.5)
+        assert isinstance(app.screen, UpdateScreen)
+        assert "9.9.9" in app.sub_title
+
+
+@pytest.mark.asyncio
+async def test_update_later_keeps_the_header_hint_and_u_reopens_it(tmp_path, monkeypatch):
+    from commandertui.modals import UpdateScreen
+
+    _enable_fake_update(monkeypatch)
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause(0.5)
+        await pilot.press("escape")  # Later
+        await pilot.pause()
+        assert not isinstance(app.screen, UpdateScreen)
+        assert "update 9.9.9 available" in app.sub_title
+        await pilot.press("u")
+        await pilot.pause()
+        assert isinstance(app.screen, UpdateScreen)
+
+
+@pytest.mark.asyncio
+async def test_update_skip_is_remembered(tmp_path, monkeypatch):
+    from commandertui import updater
+
+    _enable_fake_update(monkeypatch)
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause(0.5)
+        await pilot.click("#skip")
+        await pilot.pause()
+        assert app.update_info is None and app.sub_title == ""
+    assert updater._load_cache().get("skipped") == "9.9.9"
+
+
+@pytest.mark.asyncio
+async def test_update_now_runs_the_command_and_reports(tmp_path, monkeypatch):
+    from commandertui import updater
+
+    _enable_fake_update(monkeypatch)
+    ran = []
+    monkeypatch.setattr(updater, "run_update", lambda info: ran.append(info.latest) or True)
+    app, left, right = await _open_confirm(tmp_path, "")
+    import contextlib
+
+    app.suspend = contextlib.nullcontext  # headless tests have no real terminal to hand over
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause(0.5)
+        await pilot.click("#now")
+        await pilot.pause()
+        assert ran == ["9.9.9"]
+        assert app.update_info is None
+        assert app.screen.__class__.__name__ == "MessageScreen"
+
+
+@pytest.mark.asyncio
+async def test_source_checkout_offers_no_update_button(tmp_path, monkeypatch):
+    _enable_fake_update(monkeypatch, install="source")
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.pause(0.5)
+        assert not app.screen.query("#now")
+        assert app.screen.query("#later")
+
+
+@pytest.mark.asyncio
+async def test_u_says_up_to_date_when_nothing_is_pending(tmp_path):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("u")
+        await pilot.pause()
+        assert any("up to date" in n.message for n in app._notifications)
