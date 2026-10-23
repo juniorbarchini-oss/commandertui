@@ -353,14 +353,14 @@ async def test_main_bars_fit_in_120_columns(tmp_path):
     async with app.run_test(size=(120, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        assert len(buttons) == 16
+        assert len(buttons) == 17
         assert all(b.region.right <= 120 for b in buttons)
 
 
 @pytest.mark.asyncio
 async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
     app, left, right = await _open_confirm(tmp_path, "")
-    async with app.run_test(size=(200, 30)) as pilot:
+    async with app.run_test(size=(210, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.pause()
         rows = {b.region.y for b in app.screen.query("FnButton")}
@@ -752,13 +752,58 @@ async def test_source_checkout_offers_no_update_button(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_u_says_up_to_date_when_nothing_is_pending(tmp_path):
+async def test_u_checks_now_and_says_up_to_date(tmp_path, monkeypatch):
+    from commandertui import updater
+
+    monkeypatch.setattr(updater, "check_now", lambda: (None, True))
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(140, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.press("u")
-        await pilot.pause()
+        await pilot.pause(0.3)
         assert any("up to date" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_u_checks_now_and_offers_a_new_version_ignoring_the_daily_cache(tmp_path, monkeypatch):
+    from commandertui import updater
+    from commandertui.modals import UpdateScreen
+
+    info = updater.UpdateInfo(current="1.2.0", latest="9.9.9", install="pip")
+    monkeypatch.setattr(updater, "check_now", lambda: (info, True))
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.click("#fb-6")  # the Updates button
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, UpdateScreen)
+
+
+@pytest.mark.asyncio
+async def test_u_says_when_pypi_cannot_be_reached(tmp_path, monkeypatch):
+    from commandertui import updater
+
+    monkeypatch.setattr(updater, "check_now", lambda: (None, False))
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("u")
+        await pilot.pause(0.3)
+        assert any("Could not reach" in n.message for n in app._notifications)
+
+
+def test_check_now_ignores_cache_and_skip(monkeypatch):
+    from commandertui import updater
+
+    updater._save_cache({"checked": 9e12, "latest": "1.0.0", "skipped": "2.0.0"})
+    monkeypatch.setattr(updater, "fetch_latest", lambda: "2.0.0")
+    monkeypatch.setattr(updater, "detect_install", lambda: "pip")
+    info, reachable = updater.check_now(current="1.0.0")
+    assert reachable and info.latest == "2.0.0"  # the skipped version is offered again
+    monkeypatch.setattr(updater, "fetch_latest", lambda: None)
+    assert updater.check_now(current="1.0.0") == (None, False)
+    monkeypatch.setattr(updater, "fetch_latest", lambda: "1.0.0")
+    assert updater.check_now(current="1.0.0") == (None, True)
 
 
 @pytest.mark.asyncio
