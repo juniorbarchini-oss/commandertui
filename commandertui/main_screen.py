@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header
+from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
 from . import netlocations
@@ -14,7 +14,7 @@ from .modals import ADD_NETWORK, ChoiceScreen, InputScreen, MessageScreen, Place
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
-from .widgets import FilePanel
+from .widgets import FilePanel, FunctionBar
 
 
 class MainScreen(Screen):
@@ -63,7 +63,7 @@ class MainScreen(Screen):
         with Horizontal():
             yield FilePanel(self.left_path, side="left", id="panel-left")
             yield FilePanel(self.right_path, side="right", id="panel-right")
-        yield Footer()
+        yield FunctionBar()
 
     def on_mount(self) -> None:
         self._set_active("left")
@@ -74,6 +74,9 @@ class MainScreen(Screen):
 
     def _active_panel(self) -> FilePanel:
         return self._panel(self.active_side)
+
+    def _nothing_selected(self) -> None:
+        self.notify("Nothing selected in this pane. Press Tab to switch panes.", severity="warning")
 
     def _other_panel(self) -> FilePanel:
         return self._panel("right" if self.active_side == "left" else "left")
@@ -151,6 +154,7 @@ class MainScreen(Screen):
         src_panel = self._active_panel()
         items = src_panel.marked_or_selected()
         if not items:
+            self._nothing_selected()
             return
 
         side = OpSide.LEFT if src_panel.side == "left" else OpSide.RIGHT
@@ -172,6 +176,7 @@ class MainScreen(Screen):
         dst_panel = self._other_panel()
         items = src_panel.marked_or_selected()
         if not items:
+            self._nothing_selected()
             return
 
         side = OpSide.LEFT_TO_RIGHT if src_panel.side == "left" else OpSide.RIGHT_TO_LEFT

@@ -82,13 +82,82 @@ DataTable > .datatable--even-row {{
     background: {p['background']};
 }}
 
+ConfirmScreen #confirm-box {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: heavy {p['foreground']};
+}}
+
+ConfirmScreen #confirm-box.danger {{
+    color: {p['danger']};
+    border: heavy {p['danger']};
+}}
+
+ConfirmScreen Button, ProgressScreen Button {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: tall {p['foreground']};
+    text-style: none;
+}}
+
+ConfirmScreen Button.danger, ProgressScreen Button.danger {{
+    color: {p['danger']};
+    border: tall {p['danger']};
+}}
+
+ConfirmScreen Button:focus, ProgressScreen Button:focus {{
+    background: {p['foreground']};
+    color: {p['background']};
+    text-style: bold;
+}}
+
+ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {{
+    background: {p['danger']};
+    color: {p['background']};
+}}
+
+FilePanel {{
+    border: round {p['dim']};
+}}
+
+FilePanel.active-panel {{
+    border: heavy {p['foreground']};
+}}
+
+DataTable:blur > .datatable--cursor {{
+    background: {p['dim']};
+    color: {p['background']};
+}}
+
+FunctionBar {{
+    height: 3;
+    background: {p['background']};
+}}
+
+FnButton {{
+    background: {p['background']};
+    color: {p['foreground']};
+    border: round {p['foreground']};
+    min-width: 0;
+    width: auto;
+    padding: 0;
+    margin: 0;
+    text-style: none;
+}}
+
+FnButton:hover {{
+    background: {p['foreground']};
+    color: {p['background']};
+}}
+
 .pathbar {{
     color: {p['dim']};
     padding: 0 1;
 }}
 
 .pathbar.active {{
-    color: {p['accent']};
+    background: {p['foreground']};
+    color: {p['background']};
     text-style: bold;
 }}
 """
