@@ -4,7 +4,7 @@ import os
 
 from textual.app import App
 
-from . import settings, theme, updater
+from . import preview, settings, theme, updater
 from .boot import BootScreen
 from .main_screen import MainScreen
 
@@ -34,6 +34,7 @@ class CommanderApp(App):
         self.right_path = os.path.abspath(right_path or os.path.expanduser("~"))
 
     def on_unmount(self) -> None:
+        preview.close_preview()
         # Whatever theme is showing when the app closes is the one to reopen
         # with -- covers the picker (t) and Textual's own palette (ctrl+p).
         settings.save_theme(self.theme)

@@ -1,3 +1,4 @@
+import sys
 import pytest
 
 from commandertui.app import CommanderApp
@@ -359,14 +360,16 @@ async def test_main_bars_fit_in_120_columns(tmp_path):
     async with app.run_test(size=(120, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        assert len(buttons) == 17
+        expected_count = 18 if sys.platform == "darwin" else 17
+        assert len(buttons) == expected_count
         assert all(b.region.right <= 120 for b in buttons)
 
 
 @pytest.mark.asyncio
 async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
     app, left, right = await _open_confirm(tmp_path, "")
-    async with app.run_test(size=(210, 30)) as pilot:
+    wide_width = 230 if sys.platform == "darwin" else 210
+    async with app.run_test(size=(wide_width, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.pause()
         rows = {b.region.y for b in app.screen.query("FnButton")}

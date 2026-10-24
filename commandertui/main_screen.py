@@ -10,7 +10,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from . import __version__, editor, netlocations, theme, updater
+from . import __version__, editor, netlocations, preview, theme, updater
 from .modals import (
     ADD_NETWORK,
     ChoiceScreen,
@@ -68,6 +68,7 @@ class MainScreen(Screen):
         Binding("r", "refresh_both", "Refresh", priority=True),
         Binding("h", "toggle_hidden", "Hidden", priority=True),
         Binding("i", "show_size", "Size", priority=True),
+        Binding("v", "preview_file", "Preview", priority=True),
         # "app.quit", not "quit": this binding lives on the Screen, and a bare
         # "quit" resolves against the Screen's own (nonexistent) action_quit
         # rather than bubbling to the App, so it silently did nothing.
@@ -435,6 +436,20 @@ class MainScreen(Screen):
             self.app.push_screen(MessageScreen(f"Could not start the editor:\n{error}"))
         panel.refresh_listing()
         panel.move_cursor_to(name)
+
+    def action_preview_file(self) -> None:
+        if not preview.is_macos():
+            return
+        panel = self._active_panel()
+        name = panel.selected_name()
+        if not name or name == PARENT_MARK:
+            self.app.push_screen(MessageScreen("Preview works on files only"))
+            return
+        path = os.path.join(panel.path, name)
+        if os.path.isdir(path):
+            self.app.push_screen(MessageScreen("Preview works on files only"))
+            return
+        preview.toggle_preview(path)
 
     def action_copy(self) -> None:
         self._run_marked_op(OpKind.COPY, "Copy")
