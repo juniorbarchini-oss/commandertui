@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.3.0** — 119/119 tests passing. MIT licensed.
+Status: **v1.3.1** — 127/127 tests passing. MIT licensed.
 
 ---
 
@@ -14,7 +14,7 @@ A safe, simple alternative to heavier dual-pane file managers. It was
 written after an earlier attempt of the same idea had to be scrapped for
 running an unauthenticated local HTTP server. This project deliberately:
 
-- **Never opens a network port.** Pure terminal UI (Textual), no HTTP server (the only outgoing request is the daily update check, which you can turn off),
+- **Never opens a network port.** Pure terminal UI (Textual), no HTTP server (the only outgoing request is the update check on startup, which you can turn off),
   no webview.
 - **Never does a raw `rm -rf`.** Deletes always go through the desktop trash
   (`send2trash` → `gio trash` → manual move into `~/.local/share/Trash`, in
@@ -116,7 +116,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `F8` / `Delete` | Delete marked (to trash) |
 | `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
 | `+` / `-` / `*` | Mark / unmark by pattern (`*.iso`, or plain text = contains) / invert marks, over the rows shown |
-| `u` | Update: shows the pending new version (see *Updates*) |
+| `u` | Check for updates now (also the **Updates** button): asks PyPI right away and offers the new version if there is one |
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
 | `t` | Color theme: Phosphor green (default), Phosphor amber, Nord, Gruvbox, Dracula, Tokyo Night, Catppuccin Mocha, Solarized Dark, Monokai, Textual Dark. Previews as you move, Enter keeps it (saved in `~/.config/commandertui/settings.json`), Esc goes back |
@@ -150,7 +150,8 @@ shows the free space of that disk, and the marked count and total size.
 
 ## Updates
 
-Once a day, in the background and only after the start-up animation, the app
+On every launch, in the background while the start-up animation plays (its
+CHECKING UPDATES line shows the result), the app
 asks PyPI for the latest version (a plain GET, nothing about you is sent). If
 a newer one exists you get a dialog -- **Update now / Later / Skip this
 version** -- and the header keeps saying `update X available (press u)`.

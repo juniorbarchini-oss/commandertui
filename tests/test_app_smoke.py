@@ -6,12 +6,18 @@ from commandertui.modals import ConfirmScreen, MessageScreen
 
 async def _skip_boot(pilot):
     """Boot screen no longer auto-dismisses: Enter fast-forwards the reveal,
-    a second Enter dismisses it -- mirrors what a user actually does."""
+    a later Enter dismisses it (one more if the update check finishes in
+    between) -- mirrors what a user actually does."""
     await pilot.pause()
-    await pilot.press("enter")
-    await pilot.pause()
-    await pilot.press("enter")
-    await pilot.pause()
+    for _ in range(4):
+        await pilot.press("enter")
+        await pilot.pause()
+        if app_screen_is_main(pilot.app):
+            break
+
+
+def app_screen_is_main(app) -> bool:
+    return app.screen.__class__.__name__ != "BootScreen"
 
 
 @pytest.mark.asyncio
@@ -353,14 +359,14 @@ async def test_main_bars_fit_in_120_columns(tmp_path):
     async with app.run_test(size=(120, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        assert len(buttons) == 16
+        assert len(buttons) == 17
         assert all(b.region.right <= 120 for b in buttons)
 
 
 @pytest.mark.asyncio
 async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
     app, left, right = await _open_confirm(tmp_path, "")
-    async with app.run_test(size=(200, 30)) as pilot:
+    async with app.run_test(size=(210, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.pause()
         rows = {b.region.y for b in app.screen.query("FnButton")}
@@ -678,8 +684,9 @@ async def test_update_dialog_appears_after_the_boot_screen(tmp_path, monkeypatch
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(140, 30)) as pilot:
         await pilot.pause(0.5)
-        assert app.update_info is None  # nothing is even looked up during the boot animation
-        assert not isinstance(app.screen, UpdateScreen)
+        assert app.update_info is not None  # looked up while the boot animation plays...
+        assert app.screen.__class__.__name__ == "BootScreen"
+        assert not isinstance(app.screen, UpdateScreen)  # ...but the dialog waits for the main screen
         await _skip_boot(pilot)
         await pilot.pause(0.5)
         assert isinstance(app.screen, UpdateScreen)
@@ -752,13 +759,58 @@ async def test_source_checkout_offers_no_update_button(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_u_says_up_to_date_when_nothing_is_pending(tmp_path):
+async def test_u_checks_now_and_says_up_to_date(tmp_path, monkeypatch):
+    from commandertui import updater
+
+    monkeypatch.setattr(updater, "check_now", lambda: (None, True))
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(140, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.press("u")
-        await pilot.pause()
+        await pilot.pause(0.3)
         assert any("up to date" in n.message for n in app._notifications)
+
+
+@pytest.mark.asyncio
+async def test_u_checks_now_and_offers_a_new_version_ignoring_the_daily_cache(tmp_path, monkeypatch):
+    from commandertui import updater
+    from commandertui.modals import UpdateScreen
+
+    info = updater.UpdateInfo(current="1.2.0", latest="9.9.9", install="pip")
+    monkeypatch.setattr(updater, "check_now", lambda: (info, True))
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.click("#fb-6")  # the Updates button
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, UpdateScreen)
+
+
+@pytest.mark.asyncio
+async def test_u_says_when_pypi_cannot_be_reached(tmp_path, monkeypatch):
+    from commandertui import updater
+
+    monkeypatch.setattr(updater, "check_now", lambda: (None, False))
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("u")
+        await pilot.pause(0.3)
+        assert any("Could not reach" in n.message for n in app._notifications)
+
+
+def test_check_now_ignores_cache_and_skip(monkeypatch):
+    from commandertui import updater
+
+    updater._save_cache({"checked": 9e12, "latest": "1.0.0", "skipped": "2.0.0"})
+    monkeypatch.setattr(updater, "fetch_latest", lambda: "2.0.0")
+    monkeypatch.setattr(updater, "detect_install", lambda: "pip")
+    info, reachable = updater.check_now(current="1.0.0")
+    assert reachable and info.latest == "2.0.0"  # the skipped version is offered again
+    monkeypatch.setattr(updater, "fetch_latest", lambda: None)
+    assert updater.check_now(current="1.0.0") == (None, False)
+    monkeypatch.setattr(updater, "fetch_latest", lambda: "1.0.0")
+    assert updater.check_now(current="1.0.0") == (None, True)
 
 
 @pytest.mark.asyncio
@@ -950,3 +1002,38 @@ async def test_saved_theme_is_used_at_startup_and_unknown_one_is_ignored(tmp_pat
     assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "dracula"
     settings.save_theme("no-such-theme")
     assert CommanderApp(str(tmp_path), str(tmp_path)).theme == "phosphor-green"
+
+
+def test_title_doubles_when_scaled():
+    from commandertui.ascii_font import banner
+
+    small, big = banner("COMMANDER").split("\n"), banner("COMMANDER", scale=2).split("\n")
+    assert len(small) == 5 and len(big) == 10
+    assert len(big[0]) == 2 * len(small[0])
+    assert big[0] == big[1]  # each row repeated
+
+
+@pytest.mark.asyncio
+async def test_boot_shows_checking_updates_line_with_the_result(tmp_path, monkeypatch):
+    _enable_fake_update(monkeypatch)
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause(0.6)
+        await pilot.press("enter")  # fast-forward the reveal
+        await pilot.pause(0.3)
+        text = str(app.screen.query_one("#boot-text").render())
+        assert "CHECKING UPDATES" in text and "NEW 9.9.9" in text
+        assert "READY." in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width, scale", [(140, 2), (100, 1)])
+async def test_boot_title_is_double_size_only_in_a_wide_window(tmp_path, width, scale):
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(width, 40)) as pilot:
+        await pilot.pause()
+        assert app.screen._scale == scale
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        lines = str(app.screen.query_one("#boot-text").render()).splitlines()
+        assert lines[0].startswith("+") and len(lines[0]) <= width  # the box always fits

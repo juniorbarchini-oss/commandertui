@@ -10,7 +10,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from . import editor, netlocations, theme, updater
+from . import __version__, editor, netlocations, theme, updater
 from .modals import (
     ADD_NETWORK,
     ChoiceScreen,
@@ -220,16 +220,33 @@ class MainScreen(Screen):
 
     # ------------------------------------------------------------ updates
     def action_update_app(self) -> None:
-        if self.app.update_info is None:
-            self.notify("CommanderTUI is up to date.")
+        if self.app.update_info is not None:
+            self.app.update_prompted = False
+            self.prompt_update()
             return
-        self.app.update_prompted = False
-        self.prompt_update()
+        # Nothing known yet: ask PyPI right now instead of trusting the daily check.
+        self.notify("Checking for updates...")
+        self.run_worker(self._check_now, thread=True)
+
+    def _check_now(self) -> None:
+        info, reachable = updater.check_now()
+        self.app.call_from_thread(self._check_done, info, reachable)
+
+    def _check_done(self, info, reachable: bool) -> None:
+        if info is not None:
+            self.app.update_prompted = False
+            self.app.update_found(info)
+        elif not reachable:
+            self.notify("Could not reach PyPI. Check the connection and try again.", severity="warning")
+        else:
+            self.notify(f"CommanderTUI {__version__} is up to date.")
 
     def prompt_update(self) -> None:
         info = self.app.update_info
         if info is None or self.app.update_prompted:
             return
+        if self.app.screen is not self:
+            return  # the boot animation (or a dialog) is on top: resume will call us again
         self.app.update_prompted = True
 
         def on_choice(choice: str | None) -> None:
