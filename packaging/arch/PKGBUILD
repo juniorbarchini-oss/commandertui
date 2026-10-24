@@ -1,7 +1,7 @@
 # Maintainer: Humberto Barchini
 
 pkgname=commandertui
-pkgver=1.3.1
+pkgver=1.4.0
 pkgrel=1
 pkgdesc="Dual-pane retro terminal file manager: compare, sync, copy and move folders"
 arch=('any')
@@ -16,7 +16,7 @@ optdepends=(
   'gvfs: see network shares mounted by Nautilus in Places'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('daa4e85fc6b7c969a9617e72ea765028ea0153ba93eeb50f409ef9af6c0997a5')
+sha256sums=('867a4121ebd10e6cd76401fd4742cbae72b2af5d16a0e3a21a467bc93c88d619')
 
 build() {
   cd "$pkgname-$pkgver"
