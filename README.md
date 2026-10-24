@@ -117,6 +117,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
 | `+` / `-` / `*` | Mark / unmark by pattern (`*.iso`, or plain text = contains) / invert marks, over the rows shown |
 | `u` | Check for updates now (also the **Updates** button): asks PyPI right away and offers the new version if there is one |
+| `v` | Quick Look file preview (macOS only): opens `qlmanage -p` for the file under cursor; press `v` again or close the window to dismiss |
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
 | `t` | Color theme: Phosphor green (default), Phosphor amber, Nord, Gruvbox, Dracula, Tokyo Night, Catppuccin Mocha, Solarized Dark, Monokai, Textual Dark. Previews as you move, Enter keeps it (saved in `~/.config/commandertui/settings.json`), Esc goes back |

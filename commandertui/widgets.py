@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import shutil
+import sys
 from datetime import datetime
 
 from textual.app import ComposeResult
@@ -345,6 +346,23 @@ class FunctionBar(ActionBar):
         ("F8", "Delete", "delete"),
         ("u", "Updates", "update_app"),
     ]
+
+    @classmethod
+    def get_keys(cls) -> list[tuple[str, str, str]]:
+        keys = list(cls.KEYS)
+        if sys.platform == "darwin":
+            keys.append(("v", "Preview", "preview_file"))
+        return keys
+
+    @classmethod
+    def needed_width(cls) -> int:
+        return sum(len(f"{key} {label}") + 4 for key, label, _ in cls.get_keys())
+
+    def compose(self) -> ComposeResult:
+        for i, (key, label, action) in enumerate(self.get_keys()):
+            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"{self.PREFIX}-{i}")
+            button.action_name = action
+            yield button
 
 
 class CompareBar(ActionBar):
