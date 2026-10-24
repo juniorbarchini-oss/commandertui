@@ -97,6 +97,18 @@ async def test_sorting_columns_and_header_navigation(tmp_path, monkeypatch):
         assert panel.header_active
         assert panel.header_selected_index == 0  # Name
 
+        # Check drawn active header column: styled with reverse, complete text, no truncation
+        keys = list(table.columns.keys())
+        col_name = table.columns[keys[1]]
+        assert "reverse" in str(col_name.label.style)
+        assert col_name.label.plain == "Name ▲"
+        rendered_name = "".join(
+            s.text
+            for line in table._render_cell(-1, 1, table.rich_style, col_name.get_render_width(table))
+            for s in line
+        )
+        assert "Name ▲" in rendered_name
+
         # Press Enter on Name -> inverts to Name descending
         await pilot.press("enter")
         await pilot.pause()
@@ -108,6 +120,9 @@ async def test_sorting_columns_and_header_navigation(tmp_path, monkeypatch):
         await pilot.press("right")
         await pilot.pause()
         assert panel.header_selected_index == 1
+        col_size = table.columns[keys[2]]
+        assert "reverse" in str(col_size.label.style)
+        assert col_size.label.plain == "Size"
 
         # Press Enter on Size -> first Enter sorts Size descending (largest first)
         await pilot.press("enter")
@@ -115,6 +130,18 @@ async def test_sorting_columns_and_header_navigation(tmp_path, monkeypatch):
         assert panel.sort_column == "Size" and panel.sort_desc
         names = [panel._rows[i][0] for i in range(len(panel._rows))]
         assert names == ["..", "a_dir", "z_dir", "big_old.txt", "small_new.txt"]
+        assert col_size.label.plain == "Size ▼"
+        assert "reverse" in str(col_size.label.style)
+        rendered_size = "".join(
+            s.text
+            for line in table._render_cell(-1, 2, table.rich_style, col_size.get_render_width(table))
+            for s in line
+        )
+        assert "Size ▼" in rendered_size
+
+        # Also verify via app screenshot
+        screenshot = app.export_screenshot()
+        assert "Size" in screenshot
 
         # Second Enter on Size -> inverts to Size ascending (smallest first)
         await pilot.press("enter")
