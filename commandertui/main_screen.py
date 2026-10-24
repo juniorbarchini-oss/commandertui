@@ -440,29 +440,41 @@ class MainScreen(Screen):
             self.app.push_screen(MessageScreen("Network locations need `gio` (GVFS) installed."))
             return
 
+        def on_user(host: str, user: str | None) -> None:
+            if not user or not user.strip():
+                return
+            self._pick_share(host, user=user.strip())
+
         def on_host(scheme: str, host: str | None) -> None:
             if not host or not host.strip():
                 return
+            host_clean = host.strip()
             if scheme == "smb":
-                self._pick_share(host.strip())
+                if netlocations.is_macos():
+                    self.app.push_screen(InputScreen("SMB user:"), lambda u: on_user(host_clean, u))
+                else:
+                    self._pick_share(host_clean)
             else:
-                self._connect(netlocations.build_uri(scheme, host), save=True)
+                self._connect(netlocations.build_uri(scheme, host_clean), save=True)
 
         def on_scheme(choice: str | None) -> None:
             if not choice:
                 return
             scheme = choice.lower()
+            if netlocations.is_macos() and scheme != "smb":
+                self.app.push_screen(MessageScreen(netlocations.MACOS_UNSUPPORTED_MSG))
+                return
             self.app.push_screen(
                 InputScreen(f"{choice} server (IP or name):"), lambda host: on_host(scheme, host)
             )
 
         self.app.push_screen(ChoiceScreen("Protocol", ["SMB", "SFTP", "FTP"]), on_scheme)
 
-    def _pick_share(self, host: str, retried: bool = False) -> None:
+    def _pick_share(self, host: str, retried: bool = False, user: str | None = None) -> None:
         self.notify(f"Listing shares on {host}...")
 
         def work() -> None:
-            shares, err = netlocations.list_shares(host)
+            shares, err = netlocations.list_shares(host, user=user)
             self.app.call_from_thread(done, shares, err)
 
         def done(shares: list[str] | None, err: str) -> None:
@@ -470,23 +482,30 @@ class MainScreen(Screen):
                 if retried:
                     self.app.push_screen(MessageScreen(f"Could not list shares on {host}.\n{err}"))
                     return
-                # Most likely a login is needed: let gio ask for it on the real
-                # terminal (and offer to remember it in the keyring).
-                with self.app.suspend():
-                    netlocations.mount(netlocations.build_uri("smb", host), interactive=True)
-                self._pick_share(host, retried=True)
+                if netlocations.is_macos():
+                    netlocations.mount(netlocations.build_uri("smb", host, user=user), interactive=True)
+                else:
+                    # Most likely a login is needed: let gio ask for it on the real
+                    # terminal (and offer to remember it in the keyring).
+                    with self.app.suspend():
+                        netlocations.mount(netlocations.build_uri("smb", host), interactive=True)
+                self._pick_share(host, retried=True, user=user)
                 return
             if not shares:
                 self.app.push_screen(MessageScreen(f"No shares found on {host}."))
                 return
             self.app.push_screen(
                 ChoiceScreen(f"Shares on {host}", shares),
-                lambda share: share and self._connect(netlocations.build_uri("smb", host, share), save=True),
+                lambda share: share
+                and self._connect(netlocations.build_uri("smb", host, share, user=user), save=True),
             )
 
         self.run_worker(work, thread=True)
 
     def _connect(self, uri: str, save: bool = False, retried: bool = False) -> None:
+        if netlocations.is_macos() and not uri.lower().startswith("smb://"):
+            self.app.push_screen(MessageScreen(netlocations.MACOS_UNSUPPORTED_MSG))
+            return
         self.notify(f"Connecting to {uri} ...")
 
         def work() -> None:
@@ -500,7 +519,7 @@ class MainScreen(Screen):
                     netlocations.save_location(uri)
                 self._go_to(path)
                 return
-            if retried:
+            if retried or netlocations.is_macos():
                 self.app.push_screen(MessageScreen(f"Could not connect to {uri}.\n{err}"))
                 return
             with self.app.suspend():

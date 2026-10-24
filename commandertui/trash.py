@@ -3,6 +3,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
+
+
+def _fallback_trash_dir() -> str:
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/.Trash")
+    return os.path.expanduser("~/.local/share/Trash/files")
 
 
 def send_to_trash(path: str) -> bool:
@@ -11,8 +18,8 @@ def send_to_trash(path: str) -> bool:
     Three-layer fallback, in order of preference:
       1. send2trash (FreeDesktop-native, cross-desktop)
       2. `gio trash` (GLib/GIO, present on GNOME/KDE)
-      3. Direct move into ~/.local/share/Trash/files (last resort, e.g. for
-         external disks or network mounts without native trash support)
+      3. Direct move into ~/.Trash (macOS) or ~/.local/share/Trash/files (Linux)
+         as last resort (e.g. external disks or network mounts without native trash)
     """
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
@@ -34,7 +41,7 @@ def send_to_trash(path: str) -> bool:
         pass
 
     try:
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
+        trash_dir = _fallback_trash_dir()
         os.makedirs(trash_dir, exist_ok=True)
         base = os.path.basename(abs_path)
         name, ext = os.path.splitext(base)
