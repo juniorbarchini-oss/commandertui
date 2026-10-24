@@ -105,7 +105,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | Key | Action |
 |---|---|
 | `Tab` | Switch active pane |
-| `↑`/`↓`, `Enter` | Navigate, open directory |
+| `↑`/`↓`, `Enter` | Navigate, open directory (or sort column when header is focused with `↑` beyond row 0) |
 | `Backspace` | Go to parent directory |
 | `Space` | Mark/unmark item under cursor |
 | `F2` | Rename the item under the cursor (never overwrites an existing name) |

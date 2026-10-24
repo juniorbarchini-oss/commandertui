@@ -11,9 +11,12 @@ from textual.reactive import reactive
 from textual.widgets import Button, DataTable, Static
 
 from .scanner import path_size
+from . import settings
 
 PARENT_MARK = ".."
 SPINNER_FRAMES = "|/-\\"
+
+SORT_COLUMNS = ["Name", "Size", "Modified"]
 
 
 def _human_size(n: int) -> str:
@@ -63,8 +66,18 @@ class FilePanel(Vertical):
         self._rows: list[tuple[str, bool]] = []  # (name, is_dir), in display order
         self._sel_generation = 0  # lets a stale background size count be ignored
         self.filter_text = ""
-        self._entries: list[tuple[str, str, bool, str, str]] = []
+        self._entries: list[tuple[str, str, bool, str, str, int, float]] = []
         self._spinner = None  # Timer animating the label while folders are counted
+
+        saved_sort = settings.load_sort(self.side)
+        if saved_sort and saved_sort[0] in SORT_COLUMNS:
+            self.sort_column = saved_sort[0]
+            self.sort_desc = saved_sort[1]
+        else:
+            self.sort_column = "Name"
+            self.sort_desc = False
+        self.header_active = False
+        self.header_selected_index = 0  # 0: Name, 1: Size, 2: Modified
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="pathrow"):
@@ -72,11 +85,12 @@ class FilePanel(Vertical):
             yield Static("", id=f"{self.side}-sel", classes="pathbar pathsel")
             yield Static("", id=f"{self.side}-free", classes="pathbar pathfree")
         table = DataTable(id=f"{self.side}-table", cursor_type="row")
-        table.add_columns(" ", "Name", "Size", "Modified")
+        table.add_columns(" ", "Name", "Size", "Date")
         yield table
 
     def on_mount(self) -> None:
         self.refresh_listing()
+        self.update_header_labels()
 
     def watch_active(self, active: bool) -> None:
         for suffix in ("pathbar", "sel", "free"):
@@ -101,7 +115,7 @@ class FilePanel(Vertical):
         except (PermissionError, FileNotFoundError):
             pass
 
-        self._entries = []  # (name, full path, is_dir, size text, mtime text)
+        self._entries = []  # (name, full path, is_dir, size text, mtime text, raw_size, raw_mtime)
         for entry in entries:
             try:
                 stat = entry.stat(follow_symlinks=False)
@@ -110,7 +124,70 @@ class FilePanel(Vertical):
             is_dir = entry.is_dir(follow_symlinks=False)
             size = "<DIR>" if is_dir else _human_size(stat.st_size)
             mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-            self._entries.append((entry.name, entry.path, is_dir, size, mtime))
+            self._entries.append((entry.name, entry.path, is_dir, size, mtime, stat.st_size, stat.st_mtime))
+        self._sort_entries()
+
+    def _sort_entries(self) -> None:
+        def sort_key(item):
+            name, _, is_dir, _, _, size_val, mtime_val = item
+            if self.sort_column == "Name":
+                col_key = name.lower()
+            elif self.sort_column == "Size":
+                col_key = name.lower() if is_dir else size_val
+            elif self.sort_column == "Modified":
+                col_key = mtime_val
+            else:
+                col_key = name.lower()
+            return (not is_dir, col_key)
+
+        dirs = [e for e in self._entries if e[2]]
+        files = [e for e in self._entries if not e[2]]
+
+        if self.sort_column == "Name":
+            dirs.sort(key=lambda e: e[0].lower(), reverse=self.sort_desc)
+            files.sort(key=lambda e: e[0].lower(), reverse=self.sort_desc)
+        elif self.sort_column == "Size":
+            # If folder sizes are not calculated, folders sort by name between themselves
+            dirs.sort(key=lambda e: e[0].lower())
+            files.sort(key=lambda e: e[5], reverse=self.sort_desc)
+        elif self.sort_column == "Modified":
+            dirs.sort(key=lambda e: e[6], reverse=self.sort_desc)
+            files.sort(key=lambda e: e[6], reverse=self.sort_desc)
+        else:
+            dirs.sort(key=lambda e: e[0].lower())
+            files.sort(key=lambda e: e[0].lower())
+
+        self._entries = dirs + files
+
+    def update_header_labels(self) -> None:
+        table = self.query_one(f"#{self.side}-table", DataTable)
+        keys = list(table.columns.keys())
+        # Column 0 is " ", Column 1 is Name, Column 2 is Size, Column 3 is Modified
+        labels = {"Name": "Name", "Size": "Size", "Modified": "Date"}
+        for idx, col_name in enumerate(SORT_COLUMNS):
+            base = labels[col_name]
+            arrow = ""
+            if self.sort_column == col_name:
+                arrow = " ▲" if not self.sort_desc else " ▼"
+            if self.header_active and self.header_selected_index == idx:
+                table.columns[keys[idx + 1]].label = f"[{base}{arrow}]"
+            else:
+                table.columns[keys[idx + 1]].label = f"{base}{arrow}"
+        table.refresh()
+
+    def toggle_sort(self, col_name: str) -> None:
+        if col_name not in SORT_COLUMNS:
+            return
+        if self.sort_column == col_name:
+            self.sort_desc = not self.sort_desc
+        else:
+            self.sort_column = col_name
+            # Primer Enter: Date y Size de mayor a menor (descendente), Name de A a Z (ascendente)
+            self.sort_desc = col_name in ("Size", "Modified")
+        settings.save_sort(self.side, self.sort_column, self.sort_desc)
+        self._sort_entries()
+        self._draw_rows()
+        self.update_header_labels()
 
     def _draw_rows(self) -> None:
         """Draw the scanned entries through the current filter. No disk access,
@@ -124,7 +201,7 @@ class FilePanel(Vertical):
             self._rows.append((PARENT_MARK, True))
 
         needle = self.filter_text.lower()
-        for name, full, is_dir, size, mtime in self._entries:
+        for name, full, is_dir, size, mtime, _, _ in self._entries:
             if needle and needle not in name.lower():
                 continue
             mark = "*" if full in self.marked else ""
@@ -254,6 +331,7 @@ class FilePanel(Vertical):
                 self.path = candidate
         self.marked.clear()
         self.refresh_listing()
+        self.update_header_labels()
 
     def toggle_mark_selected(self) -> None:
         name = self.selected_name()
