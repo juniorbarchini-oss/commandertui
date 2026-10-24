@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.3.1** — 127/127 tests passing. MIT licensed.
+Status: **v1.4.0** — 153/153 tests passing. MIT licensed.
 
 ---
 
@@ -105,7 +105,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | Key | Action |
 |---|---|
 | `Tab` | Switch active pane |
-| `↑`/`↓`, `Enter` | Navigate, open directory |
+| `↑`/`↓`, `Enter` | Navigate, open directory (or sort column when header is focused with `↑` beyond row 0) |
 | `Backspace` | Go to parent directory |
 | `Space` | Mark/unmark item under cursor |
 | `F2` | Rename the item under the cursor (never overwrites an existing name) |
@@ -117,10 +117,11 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
 | `+` / `-` / `*` | Mark / unmark by pattern (`*.iso`, or plain text = contains) / invert marks, over the rows shown |
 | `u` | Check for updates now (also the **Updates** button): asks PyPI right away and offers the new version if there is one |
+| `v` | Quick Look file preview (macOS only): opens `qlmanage -p` for the file under cursor; press `v` again or close the window to dismiss |
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
 | `t` | Color theme: Phosphor green (default), Phosphor amber, Nord, Gruvbox, Dracula, Tokyo Night, Catppuccin Mocha, Solarized Dark, Monokai, Textual Dark. Previews as you move, Enter keeps it (saved in `~/.config/commandertui/settings.json`), Esc goes back |
-| `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one |
+| `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one, `e` unmount a mounted SMB share |
 | `c` | Compare: full recursive diff between the two panes' current folders, with size and date of both sides (and which is newer when a file changed) |
 | `r` | Refresh both panes |
 | `q` | Quit |
@@ -135,13 +136,13 @@ half-written), and a move never removes a source it didn't fully copy.
 on-demand mount point doesn't show), GVFS/Nautilus network shares, FUSE
 mounts inside `$HOME` (e.g. `rclone mount`), and saved bookmarks.
 
-**Network locations (Linux, needs `gio`/GVFS):** in Places press `a`, pick
+**Network locations (Linux, needs `gio`/GVFS; macOS supports SMB via `smbutil`/`osascript` and `/Volumes`):** in Places press `a`, pick
 SMB, SFTP or FTP and type the server's IP or name. For SMB the app lists the
-shares on the server and you pick one; SFTP/FTP connect straight in. The
-location is saved in `~/.config/commandertui/network.json` (protocol, host
-and share only -- never a password) and reappears in Places, mounting itself
+shares on the server and you pick one; SFTP/FTP connect straight in (Linux only). The
+location is saved in `~/.config/commandertui/network.json` (protocol, host,
+share and user only -- never a password) and reappears in Places, mounting itself
 when picked. If the server asks for a login, `gio` asks for it in the
-terminal and can remember it in the system keyring, exactly like Nautilus.
+terminal and can remember it in the system keyring, exactly like Nautilus (on macOS, the system login dialog asks and saves it in Keychain).
 
 Every key also has a clickable box on the bottom bar: one row on wide windows
 (168+ columns), two rows when narrower (120 columns is the practical minimum).

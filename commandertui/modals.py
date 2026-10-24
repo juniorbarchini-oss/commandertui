@@ -13,7 +13,7 @@ from textual.widgets import Button, DataTable, Input, OptionList, Static
 
 from .bookmarks import Place, all_places, remove_bookmark, save_bookmark
 from .models import OpKind, OperationQueue
-from .netlocations import remove_location
+from .netlocations import is_smb_mount_point, local_path, remove_location, unmount
 from .scanner import tree_stats
 
 
@@ -97,7 +97,7 @@ class ConfirmScreen(ModalScreen[bool]):
             yield Static(
                 id="confirm-summary",
                 content=f"{summary['count']} operations ({by_kind or 'nothing to do'}), "
-                f"{_human_bytes(summary['total_bytes'])} total"
+                f"{_human_bytes(summary['total_bytes'])} total",
             )
             yield Static("\n".join(f"  {name}" for name in listed), id="confirm-items", markup=False)
             with Horizontal(id="confirm-buttons"):
@@ -159,6 +159,7 @@ class PlacesScreen(ModalScreen[str | None]):
         Binding("a", "add_network", "Add network", priority=True),
         Binding("s", "save_here", "Save here", priority=True),
         Binding("d", "delete_saved", "Delete saved", priority=True),
+        Binding("e", "unmount_share", "Unmount share", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
     ]
 
@@ -176,6 +177,7 @@ class PlacesScreen(ModalScreen[str | None]):
                 yield Button("Add network  (a)", id="add")
                 yield Button("Save here  (s)", id="save")
                 yield Button("Delete saved  (d)", id="delete")
+                yield Button("Unmount share  (e)", id="unmount")
                 yield Button("Close  (Esc)", id="close")
 
     def on_mount(self) -> None:
@@ -183,10 +185,13 @@ class PlacesScreen(ModalScreen[str | None]):
 
     def _fill(self) -> None:
         table = self.query_one("#places-table", DataTable)
+        current_row = table.cursor_row
         table.clear()
         self.places: list[Place] = all_places()
         for place in self.places:
             table.add_row(place.kind, place.label, place.path, key=place.path)
+        if self.places:
+            table.move_cursor(row=min(current_row, len(self.places) - 1))
 
     def action_add_network(self) -> None:
         self.dismiss(ADD_NETWORK)
@@ -220,14 +225,50 @@ class PlacesScreen(ModalScreen[str | None]):
             return
         self._fill()
 
+    def _evict_panels_from(self, mounted_path: str) -> None:
+        home = os.path.expanduser("~")
+        prefix = mounted_path.rstrip(os.sep) + os.sep
+        for side in ("left", "right"):
+            try:
+                panel = self.app._panel(side)
+            except Exception:
+                continue
+            if panel.path == mounted_path or panel.path.startswith(prefix):
+                panel.path = home
+                panel.marked.clear()
+                panel.refresh_listing()
+
+    def action_unmount_share(self) -> None:
+        table = self.query_one("#places-table", DataTable)
+        if not self.places or table.cursor_row >= len(self.places):
+            return
+        place = self.places[table.cursor_row]
+        mounted: str | None = None
+        if place.kind == "mounted" and is_smb_mount_point(place.path):
+            mounted = place.path
+        elif (place.kind == "net-saved" and place.path.lower().startswith("smb://")) or (
+            place.kind == "network" and "smb" in os.path.basename(place.path).lower()
+        ):
+            mounted = local_path(place.path)
+
+        if not mounted:
+            self.app.push_screen(MessageScreen("Not a mounted network location"))
+            return
+        self._evict_panels_from(mounted)
+        ok, err = unmount(place.path)
+        if not ok:
+            self.app.push_screen(MessageScreen(f"Could not unmount {place.label}.\n{err}"))
+            return
+        self.notify(f"Unmounted {place.label}.")
+        self._fill()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         {
             "add": self.action_add_network,
             "save": self.action_save_here,
             "delete": self.action_delete_saved,
-        }.get(
-            event.button.id, self.action_cancel
-        )()
+            "unmount": self.action_unmount_share,
+        }.get(event.button.id, self.action_cancel)()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self.dismiss(str(event.row_key.value))
