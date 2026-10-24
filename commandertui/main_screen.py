@@ -44,6 +44,10 @@ class MainScreen(Screen):
     BINDINGS = [
         Binding("tab", "switch_pane", "Switch pane", priority=True),
         Binding("enter", "enter_dir", "Open", priority=True),
+        Binding("up", "nav_up", "Up", priority=True),
+        Binding("down", "nav_down", "Down", priority=True),
+        Binding("left", "nav_left", "Left", priority=True),
+        Binding("right", "nav_right", "Right", priority=True),
         Binding("backspace", "up_dir", "Up", priority=True),
         Binding("space", "toggle_mark", "Mark", priority=True),
         Binding("t", "pick_theme", "Theme", priority=True),
@@ -131,13 +135,91 @@ class MainScreen(Screen):
 
     # -------------------------------------------------------------- nav
     def action_switch_pane(self) -> None:
+        panel = self._active_panel()
+        if panel.header_active:
+            panel.header_active = False
+            panel.update_header_labels()
         self._set_active("right" if self.active_side == "left" else "left")
 
     def action_enter_dir(self) -> None:
-        self._active_panel().enter_selected()
+        panel = self._active_panel()
+        if panel.header_active:
+            col_name = ["Name", "Size", "Modified"][panel.header_selected_index]
+            panel.toggle_sort(col_name)
+        else:
+            panel.enter_selected()
+
+    def action_nav_up(self) -> None:
+        panel = self._active_panel()
+        table = panel.query_one(f"#{panel.side}-table", DataTable)
+        if panel.header_active:
+            return
+        if table.cursor_row == 0:
+            panel.header_active = True
+            panel.update_header_labels()
+        else:
+            table.action_cursor_up()
+
+    def action_nav_down(self) -> None:
+        panel = self._active_panel()
+        table = panel.query_one(f"#{panel.side}-table", DataTable)
+        if panel.header_active:
+            panel.header_active = False
+            panel.update_header_labels()
+        else:
+            table.action_cursor_down()
+
+    def action_nav_left(self) -> None:
+        panel = self._active_panel()
+        if panel.header_active:
+            panel.header_selected_index = max(0, panel.header_selected_index - 1)
+            panel.update_header_labels()
+        else:
+            table = panel.query_one(f"#{panel.side}-table", DataTable)
+            table.action_cursor_left()
+
+    def action_nav_right(self) -> None:
+        panel = self._active_panel()
+        if panel.header_active:
+            panel.header_selected_index = min(2, panel.header_selected_index + 1)
+            panel.update_header_labels()
+        else:
+            table = panel.query_one(f"#{panel.side}-table", DataTable)
+            table.action_cursor_right()
+
+    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        # Col 0: " ", Col 1: Name, Col 2: Size, Col 3: Modified (Date)
+        if event.column_index < 1:
+            return
+        col_names = {1: "Name", 2: "Size", 3: "Modified"}
+        col_name = col_names.get(event.column_index)
+        if not col_name:
+            return
+        panel = None
+        if isinstance(event.data_table.parent, FilePanel):
+            panel = event.data_table.parent
+        elif event.data_table.id and "left" in event.data_table.id:
+            panel = self._panel("left")
+        elif event.data_table.id and "right" in event.data_table.id:
+            panel = self._panel("right")
+        else:
+            panel = self._active_panel()
+
+        if self.active_side != panel.side:
+            active = self._active_panel()
+            if active.header_active:
+                active.header_active = False
+                active.update_header_labels()
+            self._set_active(panel.side)
+
+        panel.header_selected_index = event.column_index - 1
+        panel.toggle_sort(col_name)
 
     def action_up_dir(self) -> None:
         panel = self._active_panel()
+        if panel.header_active:
+            panel.header_active = False
+            panel.update_header_labels()
         panel.path = os.path.dirname(panel.path)
         panel.marked.clear()
         panel.refresh_listing()
