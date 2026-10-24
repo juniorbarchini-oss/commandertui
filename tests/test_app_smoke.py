@@ -447,6 +447,8 @@ async def test_selection_counter_spins_while_folders_are_counted(tmp_path, monke
         await pilot.pause(0.5)
         final = str(label.render())
         assert "4.0 KB" in final and not final.rstrip().endswith(tuple(widgets.SPINNER_FRAMES))
+
+
 @pytest.mark.asyncio
 async def test_places_buttons_close_and_add(tmp_path):
     from commandertui.modals import ADD_NETWORK, PlacesScreen
@@ -1037,3 +1039,120 @@ async def test_boot_title_is_double_size_only_in_a_wide_window(tmp_path, width, 
         await pilot.pause(0.2)
         lines = str(app.screen.query_one("#boot-text").render()).splitlines()
         assert lines[0].startswith("+") and len(lines[0]) <= width  # the box always fits
+
+
+@pytest.mark.asyncio
+async def test_macos_add_network_sftp_shows_unsupported_message(tmp_path, monkeypatch):
+    from commandertui import netlocations
+    from commandertui.modals import InputScreen
+
+    monkeypatch.setattr(netlocations.sys, "platform", "darwin")
+    monkeypatch.setattr(netlocations.shutil, "which", lambda name: f"/usr/bin/{name}")
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("p")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.press("down", "enter")  # SMB -> SFTP
+        await pilot.pause()
+        assert isinstance(app.screen, MessageScreen)
+        assert "not supported on macOS" in app.screen.text
+        await pilot.press("enter")  # dismiss message
+        await pilot.pause()
+        await pilot.press("p", "a", "enter")  # Places -> Add -> SMB
+        await pilot.pause()
+        assert isinstance(app.screen, InputScreen)
+        assert app.screen.prompt == "SMB server (IP or name):"
+        app.screen.query_one("#input-field").value = "10.0.0.5"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, InputScreen)
+        assert app.screen.prompt == "SMB user:"
+
+
+@pytest.mark.asyncio
+async def test_places_unmount_share_checks_type_evicts_panel_and_reports_busy(tmp_path, monkeypatch):
+    import os
+    from commandertui import bookmarks, modals
+    from commandertui.bookmarks import Place
+
+    mount_dir = tmp_path / "MediaMount"
+    sub_dir = mount_dir / "Movies"
+    sub_dir.mkdir(parents=True)
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    fake_places = [
+        Place(label="Home", path=str(home_dir), kind="home"),
+        Place(label="USB", path="/Volumes/USBDISK", kind="mounted"),
+        Place(label="Media @ nas (smb)", path="smb://user@nas/Media/", kind="net-saved"),
+        Place(label="HD1", path="/Volumes/HD1", kind="mounted"),
+    ]
+    monkeypatch.setattr(modals, "all_places", lambda: list(fake_places))
+    monkeypatch.setattr(bookmarks.os.path, "expanduser", lambda p: str(home_dir) if p == "~" else p)
+    monkeypatch.setattr(
+        modals,
+        "local_path",
+        lambda uri: str(mount_dir) if uri == "smb://user@nas/Media/" else None,
+    )
+    monkeypatch.setattr(
+        modals,
+        "is_smb_mount_point",
+        lambda path: path == "/Volumes/HD1",
+    )
+
+    unmounted = []
+    busy = {"flag": False}
+
+    def fake_unmount(target):
+        unmounted.append(target)
+        if busy["flag"]:
+            return False, "Volume Media on disk4 failed to unmount: dissented by PID 123"
+        return True, ""
+
+    monkeypatch.setattr(modals, "unmount", fake_unmount)
+
+    app = CommanderApp(left_path=str(sub_dir), right_path=str(home_dir))
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        assert app._panel("left").path == str(sub_dir)
+        await pilot.press("p")
+        await pilot.pause()
+
+        # Row 0 is Home (non-network) -> pressing 'e' shows "Not a mounted network location"
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, MessageScreen)
+        assert "Not a mounted network location" in app.screen.text
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # Row 1 is USB (mounted drive, NOT smbfs) -> also refused
+        await pilot.press("down", "e")
+        await pilot.pause()
+        assert isinstance(app.screen, MessageScreen)
+        assert "Not a mounted network location" in app.screen.text
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # Row 2 is mounted SMB URI location -> moves left panel to home_dir and unmounts
+        await pilot.press("down", "e")
+        await pilot.pause()
+        assert unmounted == ["smb://user@nas/Media/"]
+        assert app._panel("left").path == str(home_dir)
+
+        # Row 3 is mounted smbfs volume (/Volumes/HD1) from Finder/mount -> unmounts
+        app._panel("left").path = "/Volumes/HD1/docs"
+        await pilot.press("down", "e")
+        await pilot.pause()
+        assert unmounted[-1] == "/Volumes/HD1"
+        assert app._panel("left").path == str(home_dir)
+
+        # If unmount fails (busy), shows error in MessageScreen
+        busy["flag"] = True
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, MessageScreen)
+        assert "failed to unmount" in app.screen.text
