@@ -11,6 +11,8 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Button, DataTable, Static
 
+from rich.text import Text
+
 from .scanner import path_size
 from . import settings
 
@@ -18,6 +20,7 @@ PARENT_MARK = ".."
 SPINNER_FRAMES = "|/-\\"
 
 SORT_COLUMNS = ["Name", "Size", "Modified"]
+MIN_COLUMN_WIDTHS = {"Name": 10, "Size": 8, "Modified": 16}
 
 
 def _human_size(n: int) -> str:
@@ -166,14 +169,25 @@ class FilePanel(Vertical):
         # Column 0 is " ", Column 1 is Name, Column 2 is Size, Column 3 is Modified
         labels = {"Name": "Name", "Size": "Size", "Modified": "Date"}
         for idx, col_name in enumerate(SORT_COLUMNS):
+            col_key = keys[idx + 1]
+            column = table.columns[col_key]
             base = labels[col_name]
             arrow = ""
             if self.sort_column == col_name:
                 arrow = " ▲" if not self.sort_desc else " ▼"
+            label_text = f"{base}{arrow}"
             if self.header_active and self.header_selected_index == idx:
-                table.columns[keys[idx + 1]].label = f"[{base}{arrow}]"
+                column.label = Text(label_text, style="bold reverse")
             else:
-                table.columns[keys[idx + 1]].label = f"{base}{arrow}"
+                column.label = Text(label_text)
+            column.content_width = max(
+                column.content_width,
+                len(label_text),
+                MIN_COLUMN_WIDTHS.get(col_name, 6),
+            )
+        table._update_count += 1
+        table._clear_caches()
+        table._require_update_dimensions = True
         table.refresh()
 
     def toggle_sort(self, col_name: str) -> None:
