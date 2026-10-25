@@ -62,9 +62,14 @@ def test_fake_latest_env_shows_an_update_without_a_release(monkeypatch):
 
 
 def test_update_commands_per_install_kind():
-    assert updater.update_command("pipx", "2.0.0") == ["pipx", "upgrade", "commandertui"]
+    assert updater.update_command("pipx", "2.0.0") == [
+        "pipx",
+        "upgrade",
+        "--pip-args=--no-cache-dir",
+        "commandertui",
+    ]
     pip = updater.update_command("pip", "2.0.0")
-    assert pip[1:] == ["-m", "pip", "install", "--upgrade", "commandertui"]
+    assert pip[1:] == ["-m", "pip", "install", "--upgrade", "--no-cache-dir", "commandertui"]
     assert updater.update_command("source", "2.0.0") is None
     arch = updater.update_command("pacman", "2.0.0")
     assert arch[:2] == ["bash", "-c"]
@@ -116,3 +121,30 @@ def test_check_status_tells_ok_new_skipped_and_offline(monkeypatch):
     assert updater.check_status(current="1.1.0") == (None, "skipped")
     monkeypatch.setattr(updater, "fetch_latest", lambda: None)
     assert updater.check_status(current="1.1.0") == (None, "offline")
+
+
+def _info(latest="2.0.0", install="pipx"):
+    return updater.UpdateInfo(current="1.0.0", latest=latest, install=install)
+
+
+def test_run_update_requires_the_new_version_to_be_installed(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(updater.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0))
+    monkeypatch.setattr(updater, "installed_version", lambda: "2.0.0")
+    assert updater.run_update(_info()) is True
+    # pipx said "already up to date" (exit 0) but the old version is still there
+    monkeypatch.setattr(updater, "installed_version", lambda: "1.0.0")
+    assert updater.run_update(_info()) is False
+    # version unknown: trust the exit code
+    monkeypatch.setattr(updater, "installed_version", lambda: None)
+    assert updater.run_update(_info()) is True
+
+
+def test_run_update_fails_on_nonzero_exit_without_checking_version(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(updater.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1))
+    monkeypatch.setattr(updater, "installed_version", lambda: "2.0.0")
+    assert updater.run_update(_info()) is False
+    assert updater.run_update(_info(install="source")) is False

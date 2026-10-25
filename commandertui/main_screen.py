@@ -350,7 +350,9 @@ class MainScreen(Screen):
                     )
                 else:
                     self.app.push_screen(
-                        MessageScreen("The update did not finish. Check the terminal output, then try again.")
+                        MessageScreen(
+                            "The update did not finish. The package index may not have the new version yet:\nwait a few minutes and try again, or check the terminal output."
+                        )
                     )
 
         self.app.push_screen(UpdateScreen(info), on_choice)
