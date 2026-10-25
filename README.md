@@ -121,7 +121,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
 | `t` | Color theme: Phosphor green (default), Phosphor amber, Nord, Gruvbox, Dracula, Tokyo Night, Catppuccin Mocha, Solarized Dark, Monokai, Textual Dark. Previews as you move, Enter keeps it (saved in `~/.config/commandertui/settings.json`), Esc goes back |
-| `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one, `e` unmount a mounted SMB share |
+| `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one, `e` unmount a mounted SMB share, `l` change the login of a saved network location (forgets the session, then anonymous or another user) |
 | `c` | Compare: full recursive diff between the two panes' current folders, with size and date of both sides (and which is newer when a file changed) |
 | `r` | Refresh both panes |
 | `q` | Quit |
@@ -143,7 +143,9 @@ location is saved in `~/.config/commandertui/network.json` (protocol, host,
 share and user only -- never a password) and reappears in Places, mounting itself
 when picked. If the server asks for a login, `gio` asks for it in the
 terminal and can remember it in the system keyring, exactly like Nautilus (on macOS, the system login dialog asks and saves it in Keychain).
-If the GVFS backend for the chosen protocol is not installed (a bare Ubuntu server, for example, has none), the app says so and offers to install it for you (`apt-get install gvfs-backends`, `pacman -S gvfs gvfs-smb` or `dnf install gvfs-smb`); it asks for your sudo password in the terminal and only runs if you answer *Install now*.
+For SMB and FTP the app first asks **Anonymous (no login)** or **User and password**; anonymous connects with `gio mount --anonymous`, with no user, workgroup or password prompt, and is remembered per location. Choosing *User and password* forgets any earlier session for that server first, so the login prompt always appears.
+
+If the GVFS backend (or `gvfs-fuse`, which gives a mounted share a folder to browse) for the chosen protocol is not installed (a bare Ubuntu server, for example, has none), the app says so and offers to install it for you (`apt-get install gvfs-backends gvfs-fuse`, `pacman -S gvfs gvfs-smb` or `dnf install gvfs-smb gvfs-fuse`); it asks for your sudo password in the terminal and only runs if you answer *Install now*.
 
 Every key also has a clickable box on the bottom bar: one row on wide windows
 (168+ columns), two rows when narrower (120 columns is the practical minimum).

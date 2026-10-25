@@ -13,6 +13,7 @@ from .compare_screen import CompareScreen
 from . import __version__, editor, netlocations, preview, theme, updater
 from .modals import (
     ADD_NETWORK,
+    CHANGE_LOGIN,
     ChoiceScreen,
     FilterScreen,
     InputScreen,
@@ -25,6 +26,9 @@ from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .scanner import path_size
 from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
+
+LOGIN_ANON = "Anonymous (no login)"
+LOGIN_USER = "User and password"
 
 
 class MainScreen(Screen):
@@ -519,6 +523,8 @@ class MainScreen(Screen):
                 return
             if path == ADD_NETWORK:
                 self._add_network()
+            elif path.startswith(CHANGE_LOGIN):
+                self._change_login(path[len(CHANGE_LOGIN) :])
             elif netlocations.is_uri(path):
                 self._connect(path)
             else:
@@ -547,13 +553,26 @@ class MainScreen(Screen):
             if not host or not host.strip():
                 return
             host_clean = host.strip()
-            if scheme == "smb":
-                if netlocations.is_macos():
-                    self.app.push_screen(InputScreen("SMB user:"), lambda u: on_user(host_clean, u))
-                else:
-                    self._pick_share(host_clean)
+            if scheme == "smb" and netlocations.is_macos():
+                self.app.push_screen(InputScreen("SMB user:"), lambda u: on_user(host_clean, u))
+            elif scheme in ("smb", "ftp"):
+                self.app.push_screen(
+                    ChoiceScreen(f"Login for {host_clean}", [LOGIN_ANON, LOGIN_USER]),
+                    lambda choice: on_login(scheme, host_clean, choice),
+                )
             else:
                 self._connect(netlocations.build_uri(scheme, host_clean), save=True)
+
+        def on_login(scheme: str, host: str, choice: str | None) -> None:
+            if not choice:
+                return
+            anonymous = choice == LOGIN_ANON
+            if scheme == "smb":
+                self._pick_share(host, anonymous=anonymous, reset=not anonymous)
+            else:
+                self._connect(
+                    netlocations.build_uri(scheme, host), save=True, anonymous=anonymous, reset=not anonymous
+                )
 
         def on_scheme(choice: str | None) -> None:
             if not choice:
@@ -570,6 +589,32 @@ class MainScreen(Screen):
             )
 
         self.app.push_screen(ChoiceScreen("Protocol", ["SMB", "SFTP", "FTP"]), on_scheme)
+
+    def _change_login(self, uri: str) -> None:
+        """Forget the session of a saved location and connect again, anonymous or with another user."""
+        if netlocations.is_macos():
+            self.app.push_screen(
+                MessageScreen("Change login is not available on macOS: remove the location and add it again.")
+            )
+            return
+        local = netlocations.local_path(uri)
+        if local:
+            for side in ("left", "right"):
+                panel = self._panel(side)
+                if panel.path == local or panel.path.startswith(local.rstrip(os.sep) + os.sep):
+                    panel.path = os.path.expanduser("~")
+                    panel.marked.clear()
+                    panel.refresh_listing()
+
+        def on_choice(choice: str | None) -> None:
+            if not choice:
+                return
+            anonymous = choice == LOGIN_ANON
+            self._connect(uri, save=True, anonymous=anonymous, reset=True)
+
+        scheme = uri.partition("://")[0].lower()
+        options = [LOGIN_ANON, LOGIN_USER] if scheme in ("smb", "ftp") else [LOGIN_USER]
+        self.app.push_screen(ChoiceScreen(f"Login for {netlocations.label_for(uri)}", options), on_choice)
 
     def _offer_backend_install(self, scheme: str, label: str) -> None:
         command = netlocations.backend_install_command()
@@ -606,16 +651,25 @@ class MainScreen(Screen):
             on_choice,
         )
 
-    def _pick_share(self, host: str, retried: bool = False, user: str | None = None) -> None:
+    def _pick_share(
+        self,
+        host: str,
+        retried: bool = False,
+        user: str | None = None,
+        anonymous: bool = False,
+        reset: bool = False,
+    ) -> None:
         self.notify(f"Listing shares on {host}...")
 
         def work() -> None:
-            shares, err = netlocations.list_shares(host, user=user)
+            if reset:  # forget a previous session so the server asks for a login again
+                netlocations.reset_login(netlocations.build_uri("smb", host))
+            shares, err = netlocations.list_shares(host, user=user, anonymous=anonymous)
             self.app.call_from_thread(done, shares, err)
 
         def done(shares: list[str] | None, err: str) -> None:
             if shares is None:
-                if retried:
+                if retried or anonymous:
                     self.app.push_screen(MessageScreen(f"Could not list shares on {host}.\n{err}"))
                     return
                 if netlocations.is_macos():
@@ -633,33 +687,45 @@ class MainScreen(Screen):
             self.app.push_screen(
                 ChoiceScreen(f"Shares on {host}", shares),
                 lambda share: share
-                and self._connect(netlocations.build_uri("smb", host, share, user=user), save=True),
+                and self._connect(
+                    netlocations.build_uri("smb", host, share, user=user), save=True, anonymous=anonymous
+                ),
             )
 
         self.run_worker(work, thread=True)
 
-    def _connect(self, uri: str, save: bool = False, retried: bool = False) -> None:
+    def _connect(
+        self,
+        uri: str,
+        save: bool = False,
+        retried: bool = False,
+        anonymous: bool | None = None,
+        reset: bool = False,
+    ) -> None:
         if netlocations.is_macos() and not uri.lower().startswith("smb://"):
             self.app.push_screen(MessageScreen(netlocations.MACOS_UNSUPPORTED_MSG))
             return
         self.notify(f"Connecting to {uri} ...")
+        anon = netlocations.is_anonymous(uri) if anonymous is None else anonymous
 
         def work() -> None:
-            ok, err = netlocations.mount(uri)
+            if reset:  # forget a previous session so the server asks for a login again
+                netlocations.reset_login(uri)
+            ok, err = netlocations.mount(uri, anonymous=anon)
             path = netlocations.local_path(uri) if ok else None
             self.app.call_from_thread(done, path, err)
 
         def done(path: str | None, err: str) -> None:
             if path:
                 if save:
-                    netlocations.save_location(uri)
+                    netlocations.save_location(uri, anonymous=anon)
                 self._go_to(path)
                 return
-            if retried or netlocations.is_macos():
+            if retried or anon or netlocations.is_macos():
                 self.app.push_screen(MessageScreen(f"Could not connect to {uri}.\n{err}"))
                 return
             with self.app.suspend():
-                netlocations.mount(uri, interactive=True)
-            self._connect(uri, save=save, retried=True)
+                netlocations.mount(uri, interactive=True, anonymous=False)
+            self._connect(uri, save=save, retried=True, anonymous=False)
 
         self.run_worker(work, thread=True)
