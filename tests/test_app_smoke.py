@@ -1222,3 +1222,121 @@ async def test_missing_gvfs_backend_cancel_installs_nothing(tmp_path, monkeypatc
         await pilot.press("down", "enter")  # "Cancel"
         await pilot.pause()
         assert ran == []
+
+
+@pytest.mark.asyncio
+async def test_add_smb_asks_login_and_anonymous_skips_every_prompt(tmp_path, monkeypatch):
+    from commandertui import netlocations
+    from commandertui.modals import ChoiceScreen, InputScreen
+
+    seen = {}
+    monkeypatch.setattr(netlocations, "gio_available", lambda: True)
+    monkeypatch.setattr(netlocations, "backend_missing", lambda scheme: False)
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+
+    def fake_list(host, user=None, anonymous=False):
+        seen["list"] = (host, user, anonymous)
+        return ["Public", "HD1"], ""
+
+    monkeypatch.setattr(netlocations, "list_shares", fake_list)
+    monkeypatch.setattr(netlocations, "reset_login", lambda uri: seen.setdefault("reset", uri))
+    monkeypatch.setattr(
+        netlocations,
+        "mount",
+        lambda uri, interactive=False, anonymous=None: seen.update(mount=(uri, interactive, anonymous))
+        or (True, ""),
+    )
+    monkeypatch.setattr(netlocations, "local_path", lambda uri: str(tmp_path))
+    saved = []
+    monkeypatch.setattr(
+        netlocations, "save_location", lambda uri, user=None, anonymous=False: saved.append((uri, anonymous))
+    )
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("p", "a", "enter")  # Places -> Add -> SMB
+        await pilot.pause()
+        assert isinstance(app.screen, InputScreen)
+        app.screen.query_one("#input-field").value = "192.168.100.14"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ChoiceScreen) and app.screen.options == [
+            "Anonymous (no login)",
+            "User and password",
+        ]
+        await pilot.press("enter")  # Anonymous
+        await pilot.pause()
+        await pilot.pause()
+        assert seen["list"] == ("192.168.100.14", None, True)
+        assert "reset" not in seen  # anonymous does not need a fresh session
+        assert isinstance(app.screen, ChoiceScreen) and app.screen.options == ["Public", "HD1"]
+        await pilot.press("enter")  # Public
+        await pilot.pause()
+        await pilot.pause()
+        assert seen["mount"] == ("smb://192.168.100.14/Public/", False, True)
+        assert saved == [("smb://192.168.100.14/Public/", True)]
+
+
+@pytest.mark.asyncio
+async def test_add_smb_with_user_resets_the_old_session_first(tmp_path, monkeypatch):
+    from commandertui import netlocations
+
+    seen = {}
+    monkeypatch.setattr(netlocations, "gio_available", lambda: True)
+    monkeypatch.setattr(netlocations, "backend_missing", lambda scheme: False)
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+    monkeypatch.setattr(netlocations, "reset_login", lambda uri: seen.update(reset=uri))
+    monkeypatch.setattr(
+        netlocations,
+        "list_shares",
+        lambda host, user=None, anonymous=False: seen.update(list=anonymous) or (["HD1"], ""),
+    )
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("p", "a", "enter")
+        await pilot.pause()
+        app.screen.query_one("#input-field").value = "nas"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("down", "enter")  # User and password
+        await pilot.pause()
+        await pilot.pause()
+        assert seen == {"reset": "smb://nas/", "list": False}
+
+
+@pytest.mark.asyncio
+async def test_places_change_login_resets_and_reconnects(tmp_path, monkeypatch):
+    from commandertui import netlocations
+    from commandertui.modals import ChoiceScreen
+
+    monkeypatch.setattr(netlocations, "NETWORK_FILE", str(tmp_path / "network.json"))
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+    netlocations.save_location("smb://nas/HD1/", user="old")
+    seen = {}
+    monkeypatch.setattr(netlocations, "reset_login", lambda uri: seen.update(reset=uri))
+    monkeypatch.setattr(
+        netlocations,
+        "mount",
+        lambda uri, interactive=False, anonymous=None: seen.update(mount=(uri, anonymous)) or (True, ""),
+    )
+    monkeypatch.setattr(netlocations, "local_path", lambda uri: str(tmp_path))
+
+    app, left, right = await _open_confirm(tmp_path, "")
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        await pilot.press("p")
+        await pilot.pause()
+        table = app.screen.query_one("#places-table")
+        row = [i for i, pl in enumerate(app.screen.places) if pl.path == "smb://nas/HD1/"][0]
+        table.move_cursor(row=row)
+        await pilot.press("l")
+        await pilot.pause()
+        assert isinstance(app.screen, ChoiceScreen) and app.screen.options[0] == "Anonymous (no login)"
+        await pilot.press("enter")  # Anonymous
+        await pilot.pause()
+        await pilot.pause()
+        assert seen == {"reset": "smb://nas/HD1/", "mount": ("smb://nas/HD1/", True)}
+        assert netlocations.is_anonymous("smb://nas/HD1/")

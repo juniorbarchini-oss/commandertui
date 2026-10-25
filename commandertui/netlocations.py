@@ -32,6 +32,7 @@ class NetLocation:
     label: str
     uri: str
     user: str | None = None
+    anonymous: bool = False
 
 
 def is_macos() -> bool:
@@ -57,19 +58,36 @@ def _gvfs_mount_dirs() -> list[str]:
     ]
 
 
+_FUSE_DAEMONS = (
+    "/usr/libexec/gvfsd-fuse",
+    "/usr/lib/gvfsd-fuse",
+    "/usr/lib/gvfs/gvfsd-fuse",
+    "/usr/lib64/gvfs/gvfsd-fuse",
+    "/usr/lib/x86_64-linux-gnu/gvfs/gvfsd-fuse",
+    "/usr/lib/aarch64-linux-gnu/gvfs/gvfsd-fuse",
+)
+
+
+def _fuse_present() -> bool:
+    """GVFS shows a mounted share as a local folder (~/.../gvfs/...) only through gvfsd-fuse."""
+    return any(os.path.isfile(p) for p in _FUSE_DAEMONS) or shutil.which("gvfsd-fuse") is not None
+
+
 def backend_missing(scheme: str) -> bool:
-    """True on Linux when GVFS has no backend for `scheme` (gio then answers
-    "Operation not supported"). Always False on macOS and when `gio` is absent."""
+    """True on Linux when GVFS cannot serve `scheme`: no backend for it (gio then answers
+    "Operation not supported") or no gvfsd-fuse (the share mounts but has no local folder to open).
+    Always False on macOS and when `gio` is absent."""
     if is_macos() or not gio_available():
         return False
-    return not any(os.path.isfile(os.path.join(d, f"{scheme}.mount")) for d in _gvfs_mount_dirs())
+    has_backend = any(os.path.isfile(os.path.join(d, f"{scheme}.mount")) for d in _gvfs_mount_dirs())
+    return not (has_backend and _fuse_present())
 
 
 # Package that ships the GVFS backends, per package manager.
 _BACKEND_INSTALL = {
-    "apt-get": ["sudo", "apt-get", "install", "gvfs-backends"],
+    "apt-get": ["sudo", "apt-get", "install", "gvfs-backends", "gvfs-fuse"],
     "pacman": ["sudo", "pacman", "-S", "gvfs", "gvfs-smb"],
-    "dnf": ["sudo", "dnf", "install", "gvfs-smb"],
+    "dnf": ["sudo", "dnf", "install", "gvfs-smb", "gvfs-fuse"],
 }
 
 
@@ -86,7 +104,11 @@ def install_backend() -> bool:
     command = backend_install_command()
     if command is None:
         return False
-    return subprocess.run(command).returncode == 0
+    if subprocess.run(command).returncode != 0:
+        return False
+    # A gvfsd that was already running does not know the new components: let it restart on demand.
+    subprocess.run(["pkill", "-x", "gvfsd"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
 
 
 def build_uri(scheme: str, host: str, share: str | None = None, user: str | None = None) -> str:
@@ -187,11 +209,15 @@ def _list_shares_darwin(host: str, user: str | None = None) -> tuple[list[str] |
     return _parse_smbutil_view(res.stdout), ""
 
 
-def list_shares(host: str, user: str | None = None) -> tuple[list[str] | None, str]:
+def list_shares(host: str, user: str | None = None, anonymous: bool = False) -> tuple[list[str] | None, str]:
     """Shares on an SMB server. Returns (names, "") or (None, error) -- the
     caller retries after an interactive mount if login was the problem."""
     if is_macos():
         return _list_shares_darwin(host, user=user)
+    if anonymous:
+        ok, err = mount(build_uri("smb", host), anonymous=True)
+        if not ok:
+            return None, err
     try:
         res = _gio(["list", build_uri("smb", host)])
     except subprocess.TimeoutExpired:
@@ -291,11 +317,17 @@ def _mount_darwin(uri: str, interactive: bool = False) -> tuple[bool, str]:
     return False, f"timed out waiting for /Volumes/{share}"
 
 
-def mount(uri: str, interactive: bool = False) -> tuple[bool, str]:
+def mount(uri: str, interactive: bool = False, anonymous: bool | None = None) -> tuple[bool, str]:
+    """`anonymous=None` means: anonymous if the saved location says so. An anonymous
+    mount never prompts (`gio mount --anonymous`), so it is never interactive."""
     if is_macos():
         return _mount_darwin(uri, interactive=interactive)
+    if anonymous is None:
+        anonymous = is_anonymous(uri)
+    if anonymous:
+        interactive = False
     try:
-        res = _gio(["mount", uri], interactive)
+        res = _gio(["mount", "--anonymous", uri] if anonymous else ["mount", uri], interactive)
     except subprocess.TimeoutExpired:
         return False, "timed out"
     if res.returncode == 0:
@@ -397,7 +429,9 @@ def load_locations() -> list[NetLocation]:
             for d in json.load(f):
                 uri = d["uri"]
                 user = d.get("user") or _split_uri(uri)[1] or None
-                items.append(NetLocation(label=d["label"], uri=uri, user=user))
+                items.append(
+                    NetLocation(label=d["label"], uri=uri, user=user, anonymous=bool(d.get("anonymous")))
+                )
             return items
     except (OSError, ValueError, KeyError):
         return []
@@ -412,18 +446,38 @@ def _write(locations: list[NetLocation]) -> None:
         user = loc.user or uri_user
         if user:
             row["user"] = user
+        if loc.anonymous:
+            row["anonymous"] = True
         rows.append(row)
     with open(NETWORK_FILE, "w") as f:
         json.dump(rows, f, indent=2)
 
 
-def save_location(uri: str, user: str | None = None) -> None:
+def save_location(uri: str, user: str | None = None, anonymous: bool = False) -> None:
     _, uri_user, _, _ = _split_uri(uri)
-    effective_user = user or uri_user or None
+    effective_user = None if anonymous else (user or uri_user or None)
     locations = [loc for loc in load_locations() if loc.uri != uri]
-    locations.append(NetLocation(label=label_for(uri), uri=uri, user=effective_user))
+    locations.append(NetLocation(label=label_for(uri), uri=uri, user=effective_user, anonymous=anonymous))
     _write(locations)
+
+
+def is_anonymous(uri: str) -> bool:
+    """True when `uri` is a saved location that connects without a login."""
+    return any(loc.anonymous for loc in load_locations() if loc.uri == uri)
 
 
 def remove_location(uri: str) -> None:
     _write([loc for loc in load_locations() if loc.uri != uri])
+
+
+def reset_login(uri: str) -> None:
+    """Make gio forget the session for this location so the next connect asks for a login again:
+    unmounts the share and the server's browse mount. Not being mounted is fine; macOS has no such session."""
+    if is_macos():
+        return
+    scheme, _, host, _ = _split_uri(uri)
+    for target in dict.fromkeys([uri, build_uri(scheme, host)]):
+        try:
+            _gio(["mount", "-u", target])
+        except subprocess.TimeoutExpired:
+            pass

@@ -117,6 +117,7 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+CHANGE_LOGIN = "\0change-login:"  # prefix PlacesScreen dismisses with, followed by the saved location's URI
 ADD_NETWORK = "\0add-network"  # sentinel PlacesScreen dismisses with to start the add-network flow
 
 
@@ -160,6 +161,7 @@ class PlacesScreen(ModalScreen[str | None]):
         Binding("s", "save_here", "Save here", priority=True),
         Binding("d", "delete_saved", "Delete saved", priority=True),
         Binding("e", "unmount_share", "Unmount share", priority=True),
+        Binding("l", "change_login", "Change login", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
     ]
 
@@ -178,6 +180,7 @@ class PlacesScreen(ModalScreen[str | None]):
                 yield Button("Save here  (s)", id="save")
                 yield Button("Delete saved  (d)", id="delete")
                 yield Button("Unmount share  (e)", id="unmount")
+                yield Button("Change login  (l)", id="login")
                 yield Button("Close  (Esc)", id="close")
 
     def on_mount(self) -> None:
@@ -238,6 +241,17 @@ class PlacesScreen(ModalScreen[str | None]):
                 panel.marked.clear()
                 panel.refresh_listing()
 
+    def action_change_login(self) -> None:
+        """Forget the session of a saved network location to log in again (anonymous or another user)."""
+        table = self.query_one("#places-table", DataTable)
+        if not self.places or table.cursor_row >= len(self.places):
+            return
+        place = self.places[table.cursor_row]
+        if place.kind != "net-saved":
+            self.notify("Pick a saved network location to change its login.", severity="warning")
+            return
+        self.dismiss(CHANGE_LOGIN + place.path)
+
     def action_unmount_share(self) -> None:
         table = self.query_one("#places-table", DataTable)
         if not self.places or table.cursor_row >= len(self.places):
@@ -268,6 +282,7 @@ class PlacesScreen(ModalScreen[str | None]):
             "save": self.action_save_here,
             "delete": self.action_delete_saved,
             "unmount": self.action_unmount_share,
+            "login": self.action_change_login,
         }.get(event.button.id, self.action_cancel)()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:

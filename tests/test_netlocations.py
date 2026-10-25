@@ -252,10 +252,15 @@ def test_backend_missing_checks_gvfs_mount_files(monkeypatch, tmp_path):
     mounts = tmp_path / "gvfs" / "mounts"
     mounts.mkdir(parents=True)
     monkeypatch.setattr(netlocations, "_gvfs_mount_dirs", lambda: [str(mounts)])
+    monkeypatch.setattr(netlocations, "_fuse_present", lambda: True)
     assert netlocations.backend_missing("smb") is True
     (mounts / "smb.mount").write_text("")
     assert netlocations.backend_missing("smb") is False
     assert netlocations.backend_missing("sftp") is True
+    monkeypatch.setattr(
+        netlocations, "_fuse_present", lambda: False
+    )  # backend ok but no folder to open the share in
+    assert netlocations.backend_missing("smb") is True
 
 
 def test_backend_missing_is_false_on_macos_or_without_gio(monkeypatch):
@@ -270,7 +275,13 @@ def test_backend_install_command_per_package_manager(monkeypatch):
     monkeypatch.setattr(
         netlocations.shutil, "which", lambda name: "/usr/bin/" + name if name == "apt-get" else None
     )
-    assert netlocations.backend_install_command() == ["sudo", "apt-get", "install", "gvfs-backends"]
+    assert netlocations.backend_install_command() == [
+        "sudo",
+        "apt-get",
+        "install",
+        "gvfs-backends",
+        "gvfs-fuse",
+    ]
     monkeypatch.setattr(
         netlocations.shutil, "which", lambda name: "/usr/bin/pacman" if name == "pacman" else None
     )
@@ -282,7 +293,58 @@ def test_backend_install_command_per_package_manager(monkeypatch):
 
 def test_install_backend_reports_exit_code(monkeypatch):
     monkeypatch.setattr(netlocations, "backend_install_command", lambda: ["sudo", "true"])
-    monkeypatch.setattr(netlocations.subprocess, "run", lambda cmd: subprocess.CompletedProcess(cmd, 0))
+    monkeypatch.setattr(netlocations.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0))
     assert netlocations.install_backend() is True
-    monkeypatch.setattr(netlocations.subprocess, "run", lambda cmd: subprocess.CompletedProcess(cmd, 1))
+    monkeypatch.setattr(netlocations.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1))
     assert netlocations.install_backend() is False
+
+
+def test_anonymous_location_is_saved_and_mounted_without_prompting(monkeypatch, tmp_path):
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+    monkeypatch.setattr(netlocations, "NETWORK_FILE", str(tmp_path / "network.json"))
+    netlocations.save_location("smb://nas/Public/", anonymous=True)
+    loc = netlocations.load_locations()[0]
+    assert loc.anonymous is True and loc.user is None
+    assert netlocations.is_anonymous("smb://nas/Public/") and not netlocations.is_anonymous("smb://other/")
+    calls = []
+
+    def fake_gio(args, interactive=False):
+        calls.append((args, interactive))
+        return _cp()
+
+    monkeypatch.setattr(netlocations, "_gio", fake_gio)
+    assert netlocations.mount("smb://nas/Public/", interactive=True) == (True, "")  # saved as anonymous
+    assert calls == [(["mount", "--anonymous", "smb://nas/Public/"], False)]
+    calls.clear()
+    netlocations.mount("smb://nas/Public/", anonymous=False)  # explicit user login wins over the saved flag
+    assert calls == [(["mount", "smb://nas/Public/"], False)]
+
+
+def test_anonymous_list_shares_mounts_the_server_first(monkeypatch):
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+    calls = []
+
+    def fake_gio(args, interactive=False):
+        calls.append(args)
+        return _cp(stdout="Public\nHD1\n") if args[0] == "list" else _cp()
+
+    monkeypatch.setattr(netlocations, "_gio", fake_gio)
+    assert netlocations.list_shares("nas", anonymous=True) == (["Public", "HD1"], "")
+    assert calls == [["mount", "--anonymous", "smb://nas/"], ["list", "smb://nas/"]]
+    monkeypatch.setattr(
+        netlocations, "_gio", lambda args, interactive=False: _cp(returncode=1, stderr="denied")
+    )
+    assert netlocations.list_shares("nas", anonymous=True) == (None, "denied")
+
+
+def test_reset_login_unmounts_the_share_and_the_server(monkeypatch):
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+    calls = []
+    monkeypatch.setattr(
+        netlocations, "_gio", lambda args, interactive=False: calls.append(args) or _cp(returncode=1)
+    )
+    netlocations.reset_login("smb://nas/Public/")  # "not mounted" errors are fine
+    assert calls == [["mount", "-u", "smb://nas/Public/"], ["mount", "-u", "smb://nas/"]]
+    calls.clear()
+    netlocations.reset_login("smb://nas/")
+    assert calls == [["mount", "-u", "smb://nas/"]]
