@@ -112,10 +112,12 @@ makepkg -si
 
 def update_command(install: str, latest: str) -> list[str] | None:
     """The command to run for `install`, or None when there isn't a safe one."""
+    # --no-cache-dir: pip keeps the package index for minutes, so right after a release it
+    # can still say "already up to date" for a version PyPI already serves.
     if install == "pipx":
-        return ["pipx", "upgrade", PACKAGE]
+        return ["pipx", "upgrade", "--pip-args=--no-cache-dir", PACKAGE]
     if install == "pip":
-        return [sys.executable, "-m", "pip", "install", "--upgrade", PACKAGE]
+        return [sys.executable, "-m", "pip", "install", "--upgrade", "--no-cache-dir", PACKAGE]
     if install == "pacman":
         return ["bash", "-c", _ARCH_SCRIPT.format(repo=REPO, latest=latest)]
     return None  # git checkout: the user updates it with git
@@ -174,9 +176,25 @@ def skip_version(version: str) -> None:
     _save_cache(cache)
 
 
+def installed_version() -> str | None:
+    """The version on disk right now (not the one this process started with), or None if unknown."""
+    try:
+        from importlib import metadata
+
+        metadata.MetadataPathFinder.invalidate_caches()
+        return metadata.version(PACKAGE)
+    except Exception:
+        return None
+
+
 def run_update(info: UpdateInfo) -> bool:
-    """Run the upgrade attached to the real terminal. True if it exited 0."""
+    """Run the upgrade attached to the real terminal. True only if it exited 0 AND the
+    new version is really installed: a package manager can exit 0 with "already up to date"
+    when its index has not caught up with the release yet."""
     command = update_command(info.install, info.latest)
     if command is None:
         return False
-    return subprocess.run(command).returncode == 0
+    if subprocess.run(command).returncode != 0:
+        return False
+    now = installed_version()
+    return now is None or now == info.latest  # unknown version: trust the exit code
