@@ -244,3 +244,45 @@ def test_trash_fallback_uses_macos_trash_on_darwin(tmp_path, monkeypatch):
     assert trash.send_to_trash(str(f)) is True
     assert not f.exists()
     assert (fake_home / ".Trash" / "doc.txt").read_text() == "trash me"
+
+
+def test_backend_missing_checks_gvfs_mount_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+    monkeypatch.setattr(netlocations, "gio_available", lambda: True)
+    mounts = tmp_path / "gvfs" / "mounts"
+    mounts.mkdir(parents=True)
+    monkeypatch.setattr(netlocations, "_gvfs_mount_dirs", lambda: [str(mounts)])
+    assert netlocations.backend_missing("smb") is True
+    (mounts / "smb.mount").write_text("")
+    assert netlocations.backend_missing("smb") is False
+    assert netlocations.backend_missing("sftp") is True
+
+
+def test_backend_missing_is_false_on_macos_or_without_gio(monkeypatch):
+    monkeypatch.setattr(netlocations.sys, "platform", "darwin")
+    assert netlocations.backend_missing("smb") is False
+    monkeypatch.setattr(netlocations.sys, "platform", "linux")
+    monkeypatch.setattr(netlocations, "gio_available", lambda: False)
+    assert netlocations.backend_missing("smb") is False
+
+
+def test_backend_install_command_per_package_manager(monkeypatch):
+    monkeypatch.setattr(
+        netlocations.shutil, "which", lambda name: "/usr/bin/" + name if name == "apt-get" else None
+    )
+    assert netlocations.backend_install_command() == ["sudo", "apt-get", "install", "gvfs-backends"]
+    monkeypatch.setattr(
+        netlocations.shutil, "which", lambda name: "/usr/bin/pacman" if name == "pacman" else None
+    )
+    assert netlocations.backend_install_command() == ["sudo", "pacman", "-S", "gvfs", "gvfs-smb"]
+    monkeypatch.setattr(netlocations.shutil, "which", lambda name: None)
+    assert netlocations.backend_install_command() is None
+    assert netlocations.install_backend() is False
+
+
+def test_install_backend_reports_exit_code(monkeypatch):
+    monkeypatch.setattr(netlocations, "backend_install_command", lambda: ["sudo", "true"])
+    monkeypatch.setattr(netlocations.subprocess, "run", lambda cmd: subprocess.CompletedProcess(cmd, 0))
+    assert netlocations.install_backend() is True
+    monkeypatch.setattr(netlocations.subprocess, "run", lambda cmd: subprocess.CompletedProcess(cmd, 1))
+    assert netlocations.install_backend() is False

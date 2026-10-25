@@ -143,6 +143,7 @@ location is saved in `~/.config/commandertui/network.json` (protocol, host,
 share and user only -- never a password) and reappears in Places, mounting itself
 when picked. If the server asks for a login, `gio` asks for it in the
 terminal and can remember it in the system keyring, exactly like Nautilus (on macOS, the system login dialog asks and saves it in Keychain).
+If the GVFS backend for the chosen protocol is not installed (a bare Ubuntu server, for example, has none), the app says so and offers to install it for you (`apt-get install gvfs-backends`, `pacman -S gvfs gvfs-smb` or `dnf install gvfs-smb`); it asks for your sudo password in the terminal and only runs if you answer *Install now*.
 
 Every key also has a clickable box on the bottom bar: one row on wide windows
 (168+ columns), two rows when narrower (120 columns is the practical minimum).

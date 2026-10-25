@@ -1159,3 +1159,66 @@ async def test_places_unmount_share_checks_type_evicts_panel_and_reports_busy(tm
         await pilot.pause()
         assert isinstance(app.screen, MessageScreen)
         assert "failed to unmount" in app.screen.text
+
+
+@pytest.mark.asyncio
+async def test_missing_gvfs_backend_offers_install_and_runs_it(tmp_path, monkeypatch):
+    import contextlib
+
+    from commandertui import netlocations
+    from commandertui.modals import ChoiceScreen, InputScreen
+
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    ran = []
+    monkeypatch.setattr(netlocations, "gio_available", lambda: True)
+    monkeypatch.setattr(netlocations, "backend_missing", lambda scheme: True)
+    monkeypatch.setattr(
+        netlocations, "backend_install_command", lambda: ["sudo", "apt-get", "install", "gvfs-backends"]
+    )
+    monkeypatch.setattr(netlocations, "install_backend", lambda: ran.append(True) or True)
+
+    app = CommanderApp(left_path=str(left), right_path=str(right))
+    async with app.run_test() as pilot:
+        await _skip_boot(pilot)
+        app.suspend = contextlib.nullcontext  # headless: no real terminal to hand over
+        app.screen._add_network()
+        await pilot.pause()
+        await pilot.press("enter")  # protocol: SMB
+        await pilot.pause()
+        # no server prompt: the app asks to install first
+        assert isinstance(app.screen, ChoiceScreen) and not isinstance(app.screen, InputScreen)
+        assert "gvfs-backends" in app.screen.prompt
+        await pilot.press("enter")  # "Install now"
+        await pilot.pause()
+        assert ran == [True]
+
+
+@pytest.mark.asyncio
+async def test_missing_gvfs_backend_cancel_installs_nothing(tmp_path, monkeypatch):
+    from commandertui import netlocations
+
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    ran = []
+    monkeypatch.setattr(netlocations, "gio_available", lambda: True)
+    monkeypatch.setattr(netlocations, "backend_missing", lambda scheme: True)
+    monkeypatch.setattr(
+        netlocations, "backend_install_command", lambda: ["sudo", "apt-get", "install", "gvfs-backends"]
+    )
+    monkeypatch.setattr(netlocations, "install_backend", lambda: ran.append(True) or True)
+
+    app = CommanderApp(left_path=str(left), right_path=str(right))
+    async with app.run_test() as pilot:
+        await _skip_boot(pilot)
+        app.screen._add_network()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("down", "enter")  # "Cancel"
+        await pilot.pause()
+        assert ran == []
