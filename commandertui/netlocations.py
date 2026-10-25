@@ -48,6 +48,47 @@ def network_available() -> bool:
     return gio_available()
 
 
+def _gvfs_mount_dirs() -> list[str]:
+    data_dirs = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    return [
+        os.path.join(d, "gvfs", "mounts")
+        for d in ["/usr/share", "/usr/local/share", *data_dirs.split(":")]
+        if d
+    ]
+
+
+def backend_missing(scheme: str) -> bool:
+    """True on Linux when GVFS has no backend for `scheme` (gio then answers
+    "Operation not supported"). Always False on macOS and when `gio` is absent."""
+    if is_macos() or not gio_available():
+        return False
+    return not any(os.path.isfile(os.path.join(d, f"{scheme}.mount")) for d in _gvfs_mount_dirs())
+
+
+# Package that ships the GVFS backends, per package manager.
+_BACKEND_INSTALL = {
+    "apt-get": ["sudo", "apt-get", "install", "gvfs-backends"],
+    "pacman": ["sudo", "pacman", "-S", "gvfs", "gvfs-smb"],
+    "dnf": ["sudo", "dnf", "install", "gvfs-smb"],
+}
+
+
+def backend_install_command() -> list[str] | None:
+    """The command that installs the GVFS backends here, or None if the package manager is unknown."""
+    for manager, command in _BACKEND_INSTALL.items():
+        if shutil.which(manager):
+            return list(command)
+    return None
+
+
+def install_backend() -> bool:
+    """Run the install attached to the real terminal (sudo asks for the password). True if it exited 0."""
+    command = backend_install_command()
+    if command is None:
+        return False
+    return subprocess.run(command).returncode == 0
+
+
 def build_uri(scheme: str, host: str, share: str | None = None, user: str | None = None) -> str:
     host = host.strip().strip("/")
     user_clean = user.strip() if user else ""

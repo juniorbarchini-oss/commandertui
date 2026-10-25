@@ -365,7 +365,10 @@ class MainScreen(Screen):
 
         self.app.push_screen(
             ChoiceScreen(
-                "Color theme", labels, initial=initial, on_highlight=lambda i: self.app.preview_theme(names[i])
+                "Color theme",
+                labels,
+                initial=initial,
+                on_highlight=lambda i: self.app.preview_theme(names[i]),
             ),
             on_choice,
         )
@@ -421,9 +424,7 @@ class MainScreen(Screen):
             return
         command = editor.editor_command()
         if command is None:
-            self.app.push_screen(
-                MessageScreen("No text editor found.\nSet $EDITOR or install nano.")
-            )
+            self.app.push_screen(MessageScreen("No text editor found.\nSet $EDITOR or install nano."))
             return
         with self.app.suspend():
             try:
@@ -561,11 +562,49 @@ class MainScreen(Screen):
             if netlocations.is_macos() and scheme != "smb":
                 self.app.push_screen(MessageScreen(netlocations.MACOS_UNSUPPORTED_MSG))
                 return
+            if netlocations.backend_missing(scheme):
+                self._offer_backend_install(scheme, choice)
+                return
             self.app.push_screen(
                 InputScreen(f"{choice} server (IP or name):"), lambda host: on_host(scheme, host)
             )
 
         self.app.push_screen(ChoiceScreen("Protocol", ["SMB", "SFTP", "FTP"]), on_scheme)
+
+    def _offer_backend_install(self, scheme: str, label: str) -> None:
+        command = netlocations.backend_install_command()
+        if command is None:
+            self.app.push_screen(
+                MessageScreen(
+                    f"{label} needs the GVFS {scheme} backend, which is not installed.\nInstall your system's GVFS backends package and try again."
+                )
+            )
+            return
+        text = " ".join(command)
+
+        def on_choice(choice: str | None) -> None:
+            if choice != "Install now":
+                return
+            with self.app.suspend():
+                ok = netlocations.install_backend()
+            if ok:
+                self.app.push_screen(
+                    MessageScreen(
+                        "GVFS backends installed.\nQuit and reopen CommanderTUI, then add the location again."
+                    )
+                )
+            else:
+                self.app.push_screen(
+                    MessageScreen("The install did not finish. Check the terminal output, then try again.")
+                )
+
+        self.app.push_screen(
+            ChoiceScreen(
+                f"{label} needs the GVFS backend, which is missing. Install it now? ({text}; asks for your sudo password)",
+                ["Install now", "Cancel"],
+            ),
+            on_choice,
+        )
 
     def _pick_share(self, host: str, retried: bool = False, user: str | None = None) -> None:
         self.notify(f"Listing shares on {host}...")
