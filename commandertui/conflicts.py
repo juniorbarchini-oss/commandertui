@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import stat
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Literal
@@ -34,10 +35,13 @@ class ConflictReport:
     identical: int = 0
     dir_collisions: list[str] = field(default_factory=list)
     total_src_files_new: int = 0
+    duplicate_sources: list[str] = field(default_factory=list)
+    identical_paths: list[str] = field(default_factory=list)
+    conflicts_by_source: dict[str, Conflict] = field(default_factory=dict)
 
     @property
     def has_conflicts(self) -> bool:
-        return bool(self.conflicts)
+        return bool(self.conflicts or self.duplicate_sources)
 
 
 class Resolution(str, Enum):
@@ -109,19 +113,24 @@ def detect_conflicts(sources: list[str], dst_dir: str, cancel_check=None) -> Con
     block their subtree, so descendants are not reported as independently new.
     Cancellation returns an empty report rather than a misleading partial result.
     """
-    report = ConflictReport()
+    names = Counter(os.path.basename(os.path.normpath(source)) for source in sources)
+    report = ConflictReport(duplicate_sources=[name for name, count in names.items() if count > 1])
 
     def cancelled() -> bool:
         return bool(cancel_check and cancel_check())
 
     def compare(src: FileEntry, dst: FileEntry) -> None:
+        src_abs = os.path.join(os.path.dirname(os.path.abspath(source)), src.rel_path)
         mismatch = src.kind != dst.kind
         delta = src.mtime - dst.mtime
         newer = "same" if abs(delta) <= MTIME_TOLERANCE_SECONDS else "src" if delta > 0 else "dst"
         if not mismatch and src.size == dst.size and newer == "same":
             report.identical += 1
+            report.identical_paths.append(src_abs)
         else:
-            report.conflicts.append(Conflict(src.rel_path, src.name, src, dst, mismatch, newer))
+            conflict = Conflict(src.rel_path, src.name, src, dst, mismatch, newer)
+            report.conflicts.append(conflict)
+            report.conflicts_by_source[src_abs] = conflict
 
     for source in sources:
         if cancelled():

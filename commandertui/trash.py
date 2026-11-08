@@ -22,7 +22,7 @@ def send_to_trash(path: str) -> bool:
          as last resort (e.g. external disks or network mounts without native trash)
     """
     abs_path = os.path.abspath(path)
-    if not os.path.exists(abs_path):
+    if not os.path.lexists(abs_path):
         return False
 
     try:
@@ -47,7 +47,7 @@ def send_to_trash(path: str) -> bool:
         name, ext = os.path.splitext(base)
         target = os.path.join(trash_dir, base)
         counter = 1
-        while os.path.exists(target):
+        while os.path.lexists(target):
             target = os.path.join(trash_dir, f"{name}_{counter}{ext}")
             counter += 1
         shutil.move(abs_path, target)

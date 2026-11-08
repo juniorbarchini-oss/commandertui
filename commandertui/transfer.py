@@ -2,12 +2,16 @@
 
 MERGE is selected by a top-level directory override. The default is always a
 per-file resolution. Reports count copied leaf files (including symlinks), and
-list skipped source paths. on_item(item, result) runs after each planned item.
+list skipped source paths. identical_kept_paths contains absolute source paths
+skipped as metadata-identical; identical_kept counts those paths. The execution
+report counts only reached items, including when cancelled.
+on_item(item, result) runs after each planned item.
 """
 
 from __future__ import annotations
 
 import os
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -37,6 +41,8 @@ class TransferPlan:
     items: list[TransferItem] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     source_dirs: list[str] = field(default_factory=list)
+    identical_kept: int = 0
+    identical_kept_paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -45,6 +51,8 @@ class TransferReport:
     skipped: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
     cancelled: bool = False
+    identical_kept: int = 0
+    identical_kept_paths: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -59,7 +67,12 @@ def build_transfer_plan(
         raise ValueError("default must be a per-file resolution, not MERGE or CANCEL")
     if any(r not in allowed or r == Resolution.CANCEL for r in [policy.default, *policy.overrides.values()]):
         raise ValueError(f"Invalid resolution for {kind}")
-    conflicts = {c.rel_path: c for c in report.conflicts}
+    conflicts = defaultdict(list)
+    for conflict in report.conflicts:
+        conflicts[conflict.rel_path].append(conflict)
+    identical_paths = set(report.identical_paths)
+    source_names = [os.path.basename(os.path.abspath(source)) for source in sources]
+    seen_names: set[str] = set()
     plan = TransferPlan()
     reserved: set[str] = set()
 
@@ -75,23 +88,47 @@ def build_transfer_plan(
         return candidate
 
     def add(src, dst, rel, whole=False):
-        conflict = conflicts.get(rel)
+        conflict = report.conflicts_by_source.get(src)
+        candidates = conflicts.get(rel, [])
+        if (
+            conflict is None
+            and not report.conflicts_by_source
+            and src not in identical_paths
+            and len(candidates) == 1
+        ):
+            conflict = candidates[0]
         decision = policy.overrides.get(rel, policy.default)
         if decision == Resolution.MERGE:
             raise ValueError("MERGE requires a colliding directory")
         exists = os.path.lexists(dst)
         action = resolve(conflict, decision) if conflict else "skip" if exists else "copy"
+        if dst in reserved and action != "skip":
+            if decision == Resolution.RENAME:
+                action = "rename"
+            elif decision == Resolution.SKIP:
+                action = "skip"
+            else:
+                # Last writer wins in the plan, before any source is touched.
+                for index, previous in enumerate(plan.items):
+                    if previous.dst_abs == dst and previous.action != "skip":
+                        plan.items[index] = TransferItem(
+                            previous.src_abs, dst, "skip", False, previous.is_dir_whole
+                        )
+                        plan.skipped.append(previous.src_abs)
+                reserved.discard(dst)
+                action = "copy"
         if action == "rename":
             dst = renamed(dst)
         if action == "skip":
             plan.skipped.append(src)
+            if src in identical_paths:
+                plan.identical_kept_paths.append(src)
+                plan.identical_kept += 1
         else:
-            if action != "rename" and dst in reserved:
-                raise ValueError(f"Multiple sources target {dst}")
             reserved.add(dst)
         plan.items.append(TransferItem(src, dst, action, exists and action == "copy", whole))
 
-    for source in sources:
+    for source_index, source in enumerate(sources):
         src = os.path.abspath(source)
         name = os.path.basename(src)
         dst = os.path.abspath(os.path.join(dst_dir, name))
@@ -101,11 +138,21 @@ def build_transfer_plan(
             and os.path.commonpath([os.path.realpath(src), os.path.realpath(dst)]) == os.path.realpath(src)
         ):
             raise ValueError("Destination must be outside the source")
+        decision = policy.overrides.get(name, policy.default)
+        repeated = name in seen_names
+        seen_names.add(name)
+        later = name in source_names[source_index + 1 :]
+        if (decision == Resolution.OVERWRITE and later) or (decision == Resolution.SKIP and repeated):
+            plan.items.append(
+                TransferItem(src, dst, "skip", False, os.path.isdir(src) and not os.path.islink(src))
+            )
+            plan.skipped.append(src)
+            continue
         whole = os.path.isdir(src) and not os.path.islink(src)
         collision = whole and name in report.dir_collisions
         decision = policy.overrides.get(name, policy.default)
-        if collision and decision == Resolution.RENAME:
-            plan.items.append(TransferItem(src, renamed(dst), "rename", False, True))
+        if decision == Resolution.RENAME and (collision or repeated):
+            plan.items.append(TransferItem(src, renamed(dst), "rename", False, whole))
             continue
         descendants = any(key.startswith(name + "/") for key in policy.overrides)
         if collision and decision == Resolution.SKIP and not descendants:
@@ -124,7 +171,7 @@ def build_transfer_plan(
                 continue
             rel = f"{name}/{path}"
             target = os.path.join(dst, path)
-            if entry.kind == EntryKind.DIR and rel not in conflicts:
+            if entry.kind == EntryKind.DIR and os.path.join(src, path) not in report.conflicts_by_source:
                 plan.source_dirs.append(os.path.join(src, path))
                 if not os.path.lexists(target):
                     add(os.path.join(src, path), target, rel, True)
@@ -163,7 +210,11 @@ def execute_transfer_plan(
             src_dir = os.path.isdir(src) and not os.path.islink(src)
             dst_exists = os.path.lexists(dst)
             dst_dir = os.path.isdir(dst) and not os.path.islink(dst)
-            if os.path.realpath(src) == os.path.realpath(dst):
+            if os.path.abspath(src) == os.path.abspath(dst) or (
+                not os.path.islink(src)
+                and not os.path.islink(dst)
+                and os.path.realpath(src) == os.path.realpath(dst)
+            ):
                 raise ValueError("Source and destination refer to the same path")
             if dst_exists and not replace_existing:
                 raise FileExistsError(dst)
@@ -206,6 +257,9 @@ def execute_transfer_plan(
             break
         if item.action == "skip":
             report.skipped.append(item.src_abs)
+            if item.src_abs in plan.identical_kept_paths:
+                report.identical_kept += 1
+                report.identical_kept_paths.append(item.src_abs)
         else:
             transfer(item.src_abs, item.dst_abs, item.replace_existing)
         if on_item:

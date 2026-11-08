@@ -317,3 +317,135 @@ def test_destination_inside_source_rejected(roots):
     write(src / "file")
     with pytest.raises(ValueError):
         plan_for(src, src / "nested")
+
+
+@pytest.fixture
+def real_roots(tmp_path):
+    # Deliberately no send_to_trash patch: exercise the native trash path.
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    return src, dst
+
+
+@pytest.mark.parametrize("kind", [OpKind.COPY, OpKind.MOVE])
+@pytest.mark.parametrize("link_kind", ["relative", "absolute", "broken"])
+def test_real_symlinks(real_roots, kind, link_kind):
+    src, dst = real_roots
+    target = write(src / "target", "target-content")
+    link = src / "link"
+    text = str(target) if link_kind == "absolute" else "missing" if link_kind == "broken" else "target"
+    link.symlink_to(text)
+    report = execute_transfer_plan(plan_for(link, dst, kind=kind), kind)
+    assert report.ok and report.copied == 1
+    assert (dst / "link").is_symlink()
+    assert os.readlink(dst / "link") == text
+    assert os.path.lexists(link) == (kind == OpKind.COPY)
+    assert target.read_text() == "target-content"
+
+
+@pytest.mark.parametrize("kind", [OpKind.COPY, OpKind.MOVE])
+def test_real_identical_kept(real_roots, kind):
+    src, dst = real_roots
+    source = write(src / "file", "same")
+    write(dst / "file", "same")
+    plan = plan_for(source, dst, kind=kind)
+    assert plan.identical_kept == 1
+    assert plan.identical_kept_paths == [str(source)]
+    report = execute_transfer_plan(plan, kind)
+    assert report.ok and report.copied == 0
+    assert report.identical_kept == 1
+    assert report.identical_kept_paths == [str(source)]
+    assert source.read_text() == "same"
+
+
+@pytest.mark.parametrize("kind", [OpKind.COPY, OpKind.MOVE])
+def test_nested_identical_kept(real_roots, kind):
+    src, dst = real_roots
+    source = write(src / "folder" / "nested" / "file", "same")
+    write(dst / "folder" / "nested" / "file", "same")
+    plan = plan_for(src / "folder", dst, kind=kind)
+    assert plan.identical_kept_paths == [str(source)]
+    report = execute_transfer_plan(plan, kind)
+    assert report.ok and report.identical_kept == 1
+    assert report.identical_kept_paths == [str(source)]
+    assert source.read_text() == "same"
+
+
+@pytest.mark.parametrize("resolution", [Resolution.RENAME, Resolution.SKIP, Resolution.OVERWRITE])
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("kind", [OpKind.COPY, OpKind.MOVE])
+def test_duplicate_sources(roots, resolution, override, kind):
+    src, dst, _ = roots
+    sources = [write(src / str(index) / "file.txt", f"source-{index}") for index in range(3)]
+    paths = [str(source) for source in sources]
+    detection = detect_conflicts(paths, str(dst))
+    assert detection.duplicate_sources == ["file.txt"] and detection.has_conflicts
+    policy = (
+        ConflictPolicy(Resolution.OVERWRITE, {"file.txt": resolution})
+        if override
+        else ConflictPolicy(resolution)
+    )
+    plan = build_transfer_plan(paths, str(dst), kind, detection, policy)
+    report = execute_transfer_plan(plan, kind)
+    assert report.ok
+    if resolution == Resolution.RENAME:
+        assert report.copied == 3
+        assert [(dst / name).read_text() for name in ("file.txt", "file_1.txt", "file_2.txt")] == [
+            "source-0",
+            "source-1",
+            "source-2",
+        ]
+        retained = []
+    else:
+        winner = 2 if resolution == Resolution.OVERWRITE else 0
+        assert (dst / "file.txt").read_text() == f"source-{winner}"
+        assert report.copied == 1 and len(report.skipped) == 2
+        retained = [index for index in range(3) if index != winner]
+    for index, source in enumerate(sources):
+        assert source.exists() == (kind == OpKind.COPY or index in retained)
+
+
+def test_duplicate_conflicts_keep_source_identity(roots):
+    src, dst, _ = roots
+    older = write(src / "a" / "file", "old", 100)
+    newer = write(src / "b" / "file", "new", 300)
+    write(dst / "file", "dst", 200)
+    sources = [str(newer), str(older)]
+    detection = detect_conflicts(sources, str(dst))
+    assert len(detection.conflicts) == 2
+    assert set(detection.conflicts_by_source) == set(sources)
+    # ONLY_NEWER must use the conflict belonging to each source, not whichever
+    # homonymous entry happened to overwrite a rel_path dictionary key.
+    plan = build_transfer_plan(
+        sources, str(dst), OpKind.COPY, detection, ConflictPolicy(Resolution.ONLY_NEWER)
+    )
+    assert plan.items[0].action == "copy"
+    assert plan.items[1].action == "skip"
+
+
+def test_identical_kept_not_counted_before_cancel(real_roots):
+    src, dst = real_roots
+    source = write(src / "file")
+    write(dst / "file")
+    report = execute_transfer_plan(plan_for(source, dst), OpKind.COPY, cancel_check=lambda: True)
+    assert report.cancelled and report.identical_kept == 0 and report.identical_kept_paths == []
+
+
+@pytest.mark.parametrize("kind", [OpKind.COPY, OpKind.MOVE])
+def test_real_overwrite_symlinks_keeps_referents(real_roots, kind):
+    src, dst = real_roots
+    source_target = write(src / "source-target", "source referent")
+    old_target = write(dst / "old-target", "old referent")
+    link = src / "link"
+    link.symlink_to(source_target)
+    (dst / "link").symlink_to(old_target)
+    # Different link lengths/mtimes ensure a metadata conflict.
+    os.utime(link, (100, 100), follow_symlinks=False)
+    os.utime(dst / "link", (200, 200), follow_symlinks=False)
+    report = execute_transfer_plan(plan_for(link, dst, kind=kind), kind)
+    assert report.ok
+    assert os.readlink(dst / "link") == str(source_target)
+    assert source_target.read_text() == "source referent"
+    assert old_target.read_text() == "old referent"
+    assert os.path.lexists(link) == (kind == OpKind.COPY)
