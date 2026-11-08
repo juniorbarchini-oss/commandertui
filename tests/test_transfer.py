@@ -320,8 +320,22 @@ def test_destination_inside_source_rejected(roots):
 
 
 @pytest.fixture
-def real_roots(tmp_path):
-    # Deliberately no send_to_trash patch: exercise the native trash path.
+def real_roots(tmp_path, monkeypatch, isolated_user_home):
+    # Exercise real trash.py (including lexists and shutil.move) in the fake
+    # HOME. Disable native backends: send2trash caches HOME when imported and
+    # gio may delegate to a desktop service outside the test environment.
+    import subprocess
+    import sys
+
+    from commandertui import trash
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    monkeypatch.setitem(sys.modules, "send2trash", None)
+    monkeypatch.setattr(trash.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 1))
+    assert os.path.commonpath([trash._fallback_trash_dir(), str(tmp_path)]) == str(tmp_path)
     src, dst = tmp_path / "src", tmp_path / "dst"
     src.mkdir()
     dst.mkdir()
@@ -449,3 +463,20 @@ def test_real_overwrite_symlinks_keeps_referents(real_roots, kind):
     assert source_target.read_text() == "source referent"
     assert old_target.read_text() == "old referent"
     assert os.path.lexists(link) == (kind == OpKind.COPY)
+
+
+def test_isolated_trash_preserves_broken_link_collisions(real_roots):
+    from pathlib import Path
+
+    from commandertui import trash
+
+    src, _ = real_roots
+    trash_dir = Path(trash._fallback_trash_dir())
+    trash_dir.mkdir(parents=True)
+    (trash_dir / "link").symlink_to("missing-first")
+    link = src / "link"
+    link.symlink_to("missing-second")
+    assert trash.send_to_trash(str(link))
+    assert not os.path.lexists(link)
+    assert os.readlink(trash_dir / "link") == "missing-first"
+    assert os.readlink(trash_dir / "link_1") == "missing-second"
