@@ -705,12 +705,13 @@ class ConflictScreen(ModalScreen):
 
     DEFAULT_CSS = """
     ConflictScreen { align: center middle; }
-    #conflict-box { width: 95%; max-width: 120; height: auto; max-height: 95%;
-        border: heavy $foreground; padding: 1 2; overflow-y: auto; }
+    #conflict-box { width: 80%; min-width: 60; max-width: 100; height: auto; max-height: 95%;
+        border: heavy $foreground; padding: 1 3; overflow-y: auto; }
     #conflict-title { text-style: bold; margin-bottom: 1; }
     #conflict-summary { height: auto; margin-bottom: 1; }
-    #conflict-buttons { layout: grid; grid-size: 2; grid-rows: 3; height: auto; }
-    #conflict-buttons Button { width: 100%; min-width: 12; }
+    #conflict-buttons { height: auto; }
+    .conflict-button-row { height: 3; align: center middle; margin-top: 1; }
+    .conflict-button-row Button { min-width: 18; margin: 0 2; }
     #apply-remaining { margin-top: 1; }
     """
 
@@ -764,14 +765,12 @@ class ConflictScreen(ModalScreen):
                 else f"{count} items already exist"
             )
         )
-        if report.identical:
-            title += f" ({report.identical} identical: same size and date)"
-        if not self.rel_path and not self.file_policy:
-            title += f" in {self.dst_dir}"
         entries = report.conflicts
         if self.rel_path:
             entries = [c for c in entries if c.rel_path == self.rel_path]
-        lines = []
+        lines = [f"in {self.dst_dir}"]
+        if report.identical:
+            lines.append(f"({report.identical} identical: same size and date)")
         for conflict in entries[:6]:
 
             def side(entry, label):
@@ -804,8 +803,13 @@ class ConflictScreen(ModalScreen):
             yield Static(title, id="conflict-title", markup=False)
             yield Static(self.summary_text or "\n".join(lines), id="conflict-summary", markup=False)
             with Vertical(id="conflict-buttons"):
-                for option in self.options:
-                    yield Button(labels[option], id=f"conflict-{option}")
+                # Seven choices need one four-button row to stay within two
+                # rows. Keep the longer Overwrite label in the three-button row.
+                for row in (self.options[:3], self.options[3:]):
+                    if row:
+                        with Horizontal(classes="conflict-button-row"):
+                            for option in row:
+                                yield Button(labels[option], id=f"conflict-{option}")
             if self.rel_path:
                 yield Checkbox("Apply to all remaining (l)", id="apply-remaining")
 

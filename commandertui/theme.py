@@ -116,36 +116,36 @@ DataTable > .datatable--even-row {
     background: $background;
 }
 
-ConfirmScreen #confirm-box {
+ConfirmScreen #confirm-box, ConflictScreen #conflict-box {
     background: $background;
     color: $foreground;
     border: heavy $primary;
 }
 
-ConfirmScreen #confirm-box.danger {
+ConfirmScreen #confirm-box.danger, ConflictScreen #conflict-box.danger {
     color: $error;
     border: heavy $error;
 }
 
-ConfirmScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FilterScreen Button, UpdateScreen Button {
+ConfirmScreen Button, ConflictScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FilterScreen Button, UpdateScreen Button {
     background: $background;
     color: $foreground;
     border: tall $primary;
     text-style: none;
 }
 
-ConfirmScreen Button.danger, ProgressScreen Button.danger {
+ConfirmScreen Button.danger, ConflictScreen Button.danger, ProgressScreen Button.danger {
     color: $error;
     border: tall $error;
 }
 
-ConfirmScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FilterScreen Button:focus, UpdateScreen Button:focus {
+ConfirmScreen Button:focus, ConflictScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FilterScreen Button:focus, UpdateScreen Button:focus {
     background: $primary;
     color: $background;
     text-style: bold;
 }
 
-ConfirmScreen Button.danger:focus, ProgressScreen Button.danger:focus {
+ConfirmScreen Button.danger:focus, ConflictScreen Button.danger:focus, ProgressScreen Button.danger:focus {
     background: $error;
     color: $background;
 }
@@ -154,6 +154,38 @@ MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceSc
     background: $background;
     color: $foreground;
     border: heavy $primary;
+}
+
+ConflictScreen #conflict-box {
+    scrollbar-color: $foreground 40%;
+    scrollbar-color-hover: $primary;
+    scrollbar-color-active: $primary;
+    scrollbar-background: $background;
+}
+
+ConflictScreen Static, ConflictScreen Checkbox {
+    background: $background;
+    color: $foreground;
+}
+
+ConflictScreen Checkbox {
+    border: tall $foreground 40%;
+}
+
+ConflictScreen Checkbox:focus {
+    border: tall $primary;
+    background-tint: transparent;
+}
+
+ConflictScreen Checkbox > .toggle--button, ConflictScreen Checkbox.-on > .toggle--button {
+    color: $primary;
+    background: $background;
+}
+
+ConflictScreen Checkbox:focus > .toggle--label {
+    color: $background;
+    background: $primary;
+    text-style: bold;
 }
 
 InputScreen #input-box {

@@ -356,7 +356,8 @@ async def test_f5_identical_files_always_prompt(roots, folder):
         dialog = await screen(pilot, ConflictScreen)
         title = str(dialog.query_one("#conflict-title").render())
         summary = str(dialog.query_one("#conflict-summary").render())
-        assert "2 identical: same size and date" in title
+        assert "2 identical: same size and date" in summary
+        assert "same size" not in title and str(right) not in title
         assert summary.count("— identical") == 2 and "newer:" not in summary
         assert dialog.focused.id == "conflict-skip"
         await pilot.press("s")
@@ -410,3 +411,20 @@ async def test_ask_each_includes_identical(roots):
         assert (right / "file_1").read_text() == "new"
         assert (right / "file").read_text() == "old"
         assert source.exists()
+
+
+def test_conflict_dialog_shares_theme_rules():
+    import re
+    from commandertui import theme
+
+    for selector, peer in [
+        ("ConfirmScreen Button", "ConflictScreen Button"),
+        ("ConfirmScreen Button:focus", "ConflictScreen Button:focus"),
+        ("ConfirmScreen Button.danger", "ConflictScreen Button.danger"),
+        ("ConfirmScreen Button.danger:focus", "ConflictScreen Button.danger:focus"),
+        ("ConfirmScreen #confirm-box", "ConflictScreen #conflict-box"),
+    ]:
+        blocks = re.findall(r"([^{}]+)\{[^{}]*\}", theme.CSS)
+        shared = [block for block in blocks if selector in [s.strip() for s in block.split(",")]]
+        assert shared and any(peer in [s.strip() for s in block.split(",")] for block in shared)
+    assert "ConflictScreen Checkbox:focus > .toggle--label" in theme.CSS
