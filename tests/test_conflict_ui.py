@@ -291,7 +291,7 @@ async def test_conflict_summary_is_bounded_and_lists_duplicates(roots):
         await main(pilot)
         app.push_screen(ConflictScreen(report, str(right), OpKind.COPY))
         dialog = await screen(pilot, ConflictScreen)
-        text = str(dialog.query_one("#conflict-summary").render())
+        text = str(dialog.query_one("#conflict-list").render())
         assert "... and 3 more" in text and "Repeated source names: 0" in text
         assert "Source:" in text and "Destination:" in text and "newer: src" in text
 
@@ -355,7 +355,7 @@ async def test_f5_identical_files_always_prompt(roots, folder):
         await pilot.press("f5")
         dialog = await screen(pilot, ConflictScreen)
         title = str(dialog.query_one("#conflict-title").render())
-        summary = str(dialog.query_one("#conflict-summary").render())
+        summary = str(dialog.query_one("#conflict-list").render())
         assert "2 identical: same size and date" in summary
         assert "same size" not in title and str(right) not in title
         assert summary.count("— identical") == 2 and "newer:" not in summary
@@ -401,9 +401,7 @@ async def test_ask_each_includes_identical(roots):
         await screen(pilot, ConflictScreen)
         await pilot.press("a")
         dialog = await screen(pilot, ConflictScreen)
-        assert dialog.rel_path == "file" and "— identical" in str(
-            dialog.query_one("#conflict-summary").render()
-        )
+        assert dialog.rel_path == "file" and "— identical" in str(dialog.query_one("#conflict-list").render())
         await pilot.press("r")
         from commandertui.main_screen import MainScreen
 
@@ -428,3 +426,63 @@ def test_conflict_dialog_shares_theme_rules():
         shared = [block for block in blocks if selector in [s.strip() for s in block.split(",")]]
         assert shared and any(peer in [s.strip() for s in block.split(",")] for block in shared)
     assert "ConflictScreen Checkbox:focus > .toggle--label" in theme.CSS
+
+
+@pytest.mark.parametrize("size", [(80, 24), (100, 30), (140, 40)])
+@pytest.mark.parametrize("variant", ["copy", "move", "ask", "file_policy"])
+@pytest.mark.parametrize("count", [1, 12])
+async def test_conflict_controls_visible_at_terminal_sizes(roots, size, variant, count):
+    from rich.cells import cell_len
+
+    left, right = roots
+    sources = []
+    for index in range(count):
+        name = f"long_filename_for_conflict_number_{index:02d}.txt"
+        sources.append(str(write(left / "folder" / name)))
+        write(right / "folder" / name, "old", 100)
+    report = detect_conflicts([str(left / "folder")], str(right))
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=size) as pilot:
+        await main(pilot)
+        dialog = ConflictScreen(
+            report,
+            str(right) + "/long/" * 12,
+            OpKind.MOVE if variant == "move" else OpKind.COPY,
+            rel_path=report.conflicts[0].rel_path if variant == "ask" else None,
+            file_policy=variant == "file_policy",
+        )
+        app.push_screen(dialog)
+        await screen(pilot, ConflictScreen)
+        await pilot.pause()
+        assert dialog.focused.id == "conflict-skip"
+        box = dialog.query_one("#conflict-box")
+        title = dialog.query_one("#conflict-title")
+        summary = dialog.query_one("#conflict-summary")
+        for widget in [title, *dialog.query(Button), *dialog.query(Checkbox)]:
+            region = widget.region
+            assert region.width and region.height
+            assert 0 <= region.x < region.right <= size[0], (widget.id, region, size)
+            assert 0 <= region.y < region.bottom <= size[1], (widget.id, region, size)
+            assert box.content_region.contains_region(region), (widget.id, region, box.content_region)
+            if isinstance(widget, Button):
+                assert widget.content_region.width >= cell_len(str(widget.label)), widget.id
+                assert region.y >= summary.region.bottom
+        assert box.scroll_y == 0
+        before = title.region
+        if summary.max_scroll_y:
+            summary.scroll_end(animate=False)
+            await pilot.pause()
+            assert summary.scroll_y > 0
+        if count == 12 and size[1] < 40 and variant != "ask":
+            assert summary.max_scroll_y > 0
+        assert title.region == before and box.scroll_y == 0
+        # Resizing in place must preserve the checkbox and the focused button.
+        if variant == "ask":
+            dialog.query_one(Checkbox).value = True
+        await pilot.resize_terminal(80, 24)
+        await pilot.pause()
+        assert dialog.focused.id == "conflict-skip"
+        for button in dialog.query(Button):
+            assert button.region.right <= 80 and button.region.bottom <= 24
+        if variant == "ask":
+            assert dialog.query_one(Checkbox).value

@@ -156,7 +156,7 @@ MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceSc
     border: heavy $primary;
 }
 
-ConflictScreen #conflict-box {
+ConflictScreen #conflict-summary {
     scrollbar-color: $foreground 40%;
     scrollbar-color-hover: $primary;
     scrollbar-color-active: $primary;

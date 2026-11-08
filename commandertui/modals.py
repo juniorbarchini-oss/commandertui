@@ -7,7 +7,7 @@ import time
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, OptionList, Static
 
@@ -706,13 +706,14 @@ class ConflictScreen(ModalScreen):
     DEFAULT_CSS = """
     ConflictScreen { align: center middle; }
     #conflict-box { width: 80%; min-width: 60; max-width: 100; height: auto; max-height: 95%;
-        border: heavy $foreground; padding: 1 3; overflow-y: auto; }
-    #conflict-title { text-style: bold; margin-bottom: 1; }
-    #conflict-summary { height: auto; margin-bottom: 1; }
-    #conflict-buttons { height: auto; }
-    .conflict-button-row { height: 3; align: center middle; margin-top: 1; }
-    .conflict-button-row Button { min-width: 18; margin: 0 2; }
+        border: heavy $foreground; padding: 1 3; overflow: hidden hidden; }
+    ConflictScreen.compact #conflict-box { padding: 0 2; }
+    #conflict-title { text-style: bold; margin-bottom: 1; max-height: 2; }
+    #conflict-summary { height: auto; margin-bottom: 1; overflow: hidden auto; }
+    #conflict-buttons { height: auto; overflow: hidden hidden; }
+    #conflict-buttons Button { position: absolute; min-width: 0; height: 3; margin: 0; }
     #apply-remaining { margin-top: 1; }
+    ConflictScreen.compact #apply-remaining { margin-top: 0; }
     """
 
     BINDINGS = [
@@ -801,20 +802,83 @@ class ConflictScreen(ModalScreen):
             labels["overwrite"] = "Overwrite (keeps extra files) (o)"
         with Vertical(id="conflict-box"):
             yield Static(title, id="conflict-title", markup=False)
-            yield Static(self.summary_text or "\n".join(lines), id="conflict-summary", markup=False)
+            with VerticalScroll(id="conflict-summary"):
+                yield Static(self.summary_text or "\n".join(lines), id="conflict-list", markup=False)
             with Vertical(id="conflict-buttons"):
-                # Seven choices need one four-button row to stay within two
-                # rows. Keep the longer Overwrite label in the three-button row.
-                for row in (self.options[:3], self.options[3:]):
-                    if row:
-                        with Horizontal(classes="conflict-button-row"):
-                            for option in row:
-                                yield Button(labels[option], id=f"conflict-{option}")
+                for option in self.options:
+                    yield Button(labels[option], id=f"conflict-{option}")
             if self.rel_path:
                 yield Checkbox("Apply to all remaining (l)", id="apply-remaining")
 
     def on_mount(self):
+        self._resize_layout()
         self.query_one("#conflict-skip", Button).focus()
+
+    def on_resize(self):
+        self._resize_layout()
+
+    def _resize_layout(self):
+        self.set_class(self.size.width < 125 or self.size.height < 30, "compact")
+        self.call_after_refresh(self._layout_controls)
+
+    def _layout_controls(self):
+        """Wrap measured button widths; reserve fixed space outside the list.
+
+        Reposition existing buttons instead of remounting them, preserving
+        focus and the Ask each checkbox when the terminal is resized.
+        """
+        from rich.cells import cell_len
+
+        box = self.query_one("#conflict-box")
+        controls = self.query_one("#conflict-buttons")
+        buttons = list(controls.query(Button))
+        available = controls.content_size.width
+        if not available:
+            return
+        compact = self.has_class("compact")
+        margin = 1 if compact else 2
+        widths = [
+            max(14 if compact else 18, cell_len(str(button.label)) + max(4, button.gutter.width))
+            for button in buttons
+        ]
+        rows = [list(range(min(3, len(buttons)))), list(range(3, len(buttons)))]
+        if compact or any(sum(widths[i] + 2 * margin for i in row) > available for row in rows):
+            rows = []
+            row = []
+            used = 0
+            for index, width in enumerate(widths):
+                if row and used + width + 2 * margin > available:
+                    rows.append(row)
+                    row, used = [], 0
+                row.append(index)
+                used += width + 2 * margin
+            if row:
+                rows.append(row)
+        y = 1
+        for row in filter(None, rows):
+            used = sum(widths[i] + 2 * margin for i in row)
+            x = max(0, (available - used) // 2)
+            for index in row:
+                button = buttons[index]
+                button.styles.width = min(widths[index], available - 2 * margin)
+                button.styles.offset = (x + margin, y)
+                x += widths[index] + 2 * margin
+            y += 3 if compact else 4
+        controls.styles.height = y if compact else y - 1
+        title = self.query_one("#conflict-title")
+        summary = self.query_one("#conflict-summary")
+        checkbox = self.query("#apply-remaining")
+        checkbox_height = (3 + (0 if compact else 1)) if checkbox else 0
+        # Auto height keeps the established large-dialog proportions. Only the
+        # summary is capped and scrollable; focus can never scroll the box.
+        reserved = (
+            box.gutter.height
+            + min(2, title.get_content_height(box.content_size, self.size, available))
+            + title.styles.margin.height
+            + int(controls.styles.height.value)
+        )
+        reserved += checkbox_height + summary.styles.margin.height
+        summary.styles.max_height = max(1, int(self.size.height * 0.95) - reserved)
 
     def action_choose(self, value):
         from textual.widgets import Checkbox
