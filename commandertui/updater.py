@@ -196,7 +196,7 @@ def update_notice(info: UpdateInfo) -> str:
     if info.install == "pacman":
         return (
             f"{head}\nDownloading the release and building the package; this takes a few seconds.\n"
-            "At the end it asks for your sudo password once, to install it.\n"
+            "It asks for your sudo password to install it (and at the start, if build tools are missing).\n"
         )
     return f"{head}\nDownloading and installing; this can take a moment.\n"
 
