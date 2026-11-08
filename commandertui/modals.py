@@ -698,3 +698,133 @@ class UpdateScreen(ModalScreen[str]):
 
     def action_skip(self) -> None:
         self.dismiss("skip")
+
+
+class ConflictScreen(ModalScreen):
+    """One safe decision for a batch or one collision; no filesystem changes."""
+
+    DEFAULT_CSS = """
+    ConflictScreen { align: center middle; }
+    #conflict-box { width: 95%; max-width: 120; height: auto; max-height: 95%;
+        border: heavy $foreground; padding: 1 2; overflow-y: auto; }
+    #conflict-title { text-style: bold; margin-bottom: 1; }
+    #conflict-summary { height: auto; margin-bottom: 1; }
+    #conflict-buttons { layout: grid; grid-size: 2; grid-rows: 3; height: auto; }
+    #conflict-buttons Button { width: 100%; min-width: 12; }
+    #apply-remaining { margin-top: 1; }
+    """
+
+    BINDINGS = [
+        Binding(key, f"choose('{value}')", label, priority=True)
+        for key, value, label in [
+            ("o", "overwrite", "Overwrite"),
+            ("s", "skip", "Skip"),
+            ("n", "only_newer", "Only newer"),
+            ("r", "rename", "Rename"),
+            ("m", "merge", "Merge"),
+            ("a", "ask", "Ask each"),
+            ("c", "cancel", "Cancel"),
+            ("escape", "cancel", "Cancel"),
+        ]
+    ]
+
+    def __init__(self, report, dst_dir, kind, *, rel_path=None, file_policy=False, summary=None):
+        super().__init__()
+        from .conflicts import Resolution, allowed_resolutions
+
+        self.report_data = report
+        self.dst_dir = dst_dir
+        self.kind = kind
+        self.rel_path = rel_path
+        self.file_policy = file_policy
+        self.summary_text = summary
+        self.options = [
+            r.value
+            for r in allowed_resolutions(kind)
+            if r != Resolution.MERGE or (report.dir_collisions and not file_policy and rel_path is None)
+        ]
+        if not file_policy and rel_path is None:
+            self.options.insert(-1, "ask")
+
+    def compose(self):
+        from textual.widgets import Checkbox
+
+        report = self.report_data
+        count = len(
+            {c.rel_path for c in report.conflicts}
+            | set(report.dir_collisions)
+            | set(report.duplicate_sources)
+        )
+        title = (
+            f"Resolve {self.rel_path}"
+            if self.rel_path
+            else (
+                "Choose a policy for conflicting files"
+                if self.file_policy
+                else f"{count} items already exist in {self.dst_dir}"
+            )
+        )
+        if report.identical:
+            title += f" — {report.identical} identical, skipped"
+        entries = report.conflicts
+        if self.rel_path:
+            entries = [c for c in entries if c.rel_path == self.rel_path]
+        lines = []
+        for conflict in entries[:6]:
+
+            def side(entry, label):
+                date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry.mtime))
+                return f"{label}: {_human_bytes(entry.size)}, {date}"
+
+            lines.append(
+                f"{conflict.rel_path}: {side(conflict.src, 'Source')} | "
+                f"{side(conflict.dst, 'Destination')} — newer: {conflict.newer}"
+            )
+        if len(entries) > 6:
+            lines.append(f"... and {len(entries) - 6} more")
+        if report.dir_collisions:
+            lines.append("Existing folders: " + ", ".join(report.dir_collisions[:6]))
+        if report.duplicate_sources:
+            lines.append("Repeated source names: " + ", ".join(report.duplicate_sources))
+        labels = {
+            "overwrite": "Overwrite (o)",
+            "skip": "Skip (s)",
+            "only_newer": "Only newer (n)",
+            "rename": "Rename (r)",
+            "merge": "Merge (m)",
+            "ask": "Ask each (a)",
+            "cancel": "Cancel (Esc)",
+        }
+        if report.dir_collisions and not self.file_policy:
+            labels["overwrite"] = "Overwrite (keeps extra files) (o)"
+        with Vertical(id="conflict-box"):
+            yield Static(title, id="conflict-title", markup=False)
+            yield Static(self.summary_text or "\n".join(lines), id="conflict-summary", markup=False)
+            with Vertical(id="conflict-buttons"):
+                for option in self.options:
+                    yield Button(labels[option], id=f"conflict-{option}")
+            if self.rel_path:
+                yield Checkbox("Apply to all remaining (l)", id="apply-remaining")
+
+    def on_mount(self):
+        self.query_one("#conflict-skip", Button).focus()
+
+    def action_choose(self, value):
+        from textual.widgets import Checkbox
+
+        if value not in self.options:
+            return
+        apply = self.query_one("#apply-remaining", Checkbox).value if self.rel_path else False
+        self.dismiss((value, apply))
+
+    def action_cancel(self):
+        self.dismiss(("cancel", False))
+
+    def key_l(self):
+        if self.rel_path:
+            checkbox = self.query_one("#apply-remaining")
+            checkbox.value = not checkbox.value
+
+    def on_button_pressed(self, event: Button.Pressed):
+        event.stop()
+        self.action_choose(event.button.id.removeprefix("conflict-"))

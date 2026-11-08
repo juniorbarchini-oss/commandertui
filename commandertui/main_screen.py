@@ -24,6 +24,7 @@ from .modals import (
 )
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
+from .run_transfer import run_transfer
 from .scanner import path_size
 from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
 
@@ -491,6 +492,10 @@ class MainScreen(Screen):
         items = src_panel.marked_or_selected()
         if not items:
             self._nothing_selected()
+            return
+
+        if kind == OpKind.COPY:
+            run_transfer(self, kind, label, src_panel, dst_panel, items)
             return
 
         side = OpSide.LEFT_TO_RIGHT if src_panel.side == "left" else OpSide.RIGHT_TO_LEFT
