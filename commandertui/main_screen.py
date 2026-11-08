@@ -494,29 +494,7 @@ class MainScreen(Screen):
             self._nothing_selected()
             return
 
-        if kind == OpKind.COPY:
-            run_transfer(self, kind, label, src_panel, dst_panel, items)
-            return
-
-        side = OpSide.LEFT_TO_RIGHT if src_panel.side == "left" else OpSide.RIGHT_TO_LEFT
-        queue = OperationQueue()
-        for item in items:
-            rel_path = os.path.relpath(item, src_panel.path)
-            queue.add(QueuedOp(kind, side, rel_path, os.path.isdir(item), size=path_size(item)))
-
-        def after(report) -> None:
-            src_panel.marked.clear()
-            src_panel.refresh_listing()
-            dst_panel.refresh_listing()
-
-        run_queue_with_progress(
-            self,
-            f"{label} to {dst_panel.path}",
-            queue,
-            self._panel("left").path,
-            self._panel("right").path,
-            after,
-        )
+        run_transfer(self, kind, label, src_panel, dst_panel, items)
 
     # ------------------------------------------------------------- misc
     def action_show_compare(self) -> None:

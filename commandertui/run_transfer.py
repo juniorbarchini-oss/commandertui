@@ -175,8 +175,9 @@ def run_transfer(owner, kind, label, src_panel, dst_panel, sources):
             src_panel.refresh_listing()
             dst_panel.refresh_listing()
             summary = f"{result.copied} copied, {len(result.skipped)} skipped, {len(result.failed)} failed"
-            if kind == OpKind.MOVE and result.identical_kept:
-                summary += f"\n{result.identical_kept} identical files stayed in the source"
+            identical_kept = result.identical_kept or plan.identical_kept
+            if kind == OpKind.MOVE and identical_kept:
+                summary += f"\n{identical_kept} identical files stayed in the source"
             if result.cancelled:
                 owner.app.push_screen(MessageScreen(CANCELLED_TEXT + "\n\n" + summary))
             elif result.failed:

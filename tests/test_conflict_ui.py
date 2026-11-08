@@ -101,7 +101,8 @@ async def test_escape_conflict_keeps_marks(roots):
         assert (right / "file").read_text() == "old"
 
 
-async def test_ask_each_apply_remaining(roots):
+@pytest.mark.parametrize("key", ["f5", "f6"])
+async def test_ask_each_apply_remaining(roots, isolated_trash, key):
     left, right = roots
     for name in ("a", "b"):
         write(left / name)
@@ -110,7 +111,7 @@ async def test_ask_each_apply_remaining(roots):
     async with app.run_test(size=(140, 40)) as pilot:
         await main(pilot)
         app._panel("left").marked.update(str(left / name) for name in ("a", "b"))
-        await pilot.press("f5")
+        await pilot.press(key)
         await screen(pilot, ConflictScreen)
         await pilot.press("a")
         dialog = await screen(pilot, ConflictScreen)
@@ -150,3 +151,187 @@ async def test_folder_merge_second_policy(roots):
         assert (right / "folder" / "missing").read_text() == "new"
         assert (right / "folder" / "extra").read_text() == "extra"
         assert str(left / "folder") in app._panel("left").marked
+
+
+@pytest.fixture
+def isolated_trash(monkeypatch):
+    import subprocess
+    import sys
+    from commandertui import trash
+
+    # Real fallback, isolated by conftest's HOME; never delegate to a service.
+    monkeypatch.setitem(sys.modules, "send2trash", None)
+    monkeypatch.setattr(trash.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 1))
+
+
+@pytest.mark.parametrize("choice", ["s", "o", "r"])
+async def test_f6_conflict_and_retained_marks(roots, isolated_trash, choice):
+    left, right = roots
+    source = write(left / "file")
+    write(right / "file", "old", 100)
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f6")
+        dialog = await screen(pilot, ConflictScreen)
+        assert "merge" not in dialog.options and "only_newer" not in dialog.options
+        assert "ask" in dialog.options
+        await pilot.press(choice)
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert source.exists() == (choice == "s")
+        assert (str(source) in app._panel("left").marked) == (choice == "s")
+        assert (right / "file").read_text() == ("new" if choice == "o" else "old")
+        if choice == "r":
+            assert (right / "file_1").read_text() == "new"
+
+
+async def test_f6_without_conflicts(roots, isolated_trash):
+    left, right = roots
+    source = write(left / "file")
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f6")
+        await screen(pilot, ConfirmScreen)
+        await pilot.press("y")
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert not source.exists() and (right / "file").read_text() == "new"
+        assert not app._panel("left").marked
+
+
+async def test_f6_identical_message_and_marks(roots, isolated_trash, monkeypatch):
+    left, right = roots
+    source = write(left / "file", "same")
+    write(right / "file", "same")
+    app = CommanderApp(str(left), str(right))
+    messages = []
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: messages.append(message))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f6")
+        await screen(pilot, ConfirmScreen)
+        await pilot.press("y")
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert source.read_text() == "same" and str(source) in app._panel("left").marked
+        assert any("1 identical files stayed in the source" in message for message in messages)
+
+
+async def test_ask_each_cancel_discards_decisions(roots):
+    left, right = roots
+    for name in ("a", "b"):
+        write(left / name)
+        write(right / name, "old", 100)
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        app._panel("left").marked.update(str(left / name) for name in ("a", "b"))
+        await pilot.press("f5")
+        await screen(pilot, ConflictScreen)
+        await pilot.press("a")
+        await screen(pilot, ConflictScreen)
+        await pilot.press("o")
+        dialog = await screen(pilot, ConflictScreen)
+        assert dialog.rel_path == "b"
+        await pilot.press("escape")
+        assert [(right / name).read_text() for name in ("a", "b")] == ["old", "old"]
+        assert len(app._panel("left").marked) == 2
+
+
+async def test_scan_is_responsive_and_cancellable(roots, monkeypatch):
+    import threading
+    from commandertui import run_transfer
+    from commandertui.conflicts import ConflictReport
+    from commandertui.progress_screen import ProgressScreen
+
+    left, right = roots
+    source = write(left / "file")
+    release = threading.Event()
+    observed = []
+
+    def slow_scan(sources, destination, cancel_check):
+        release.wait(5)
+        observed.append(cancel_check())
+        return ConflictReport()
+
+    monkeypatch.setattr(run_transfer, "detect_conflicts", slow_scan)
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f5")
+        progress = await screen(pilot, ProgressScreen)
+        try:
+            await pilot.press("escape", "y")
+            assert progress.cancel_requested
+        finally:
+            release.set()
+        dialog = await screen(pilot, MessageScreen)
+        assert "Cancelled." in dialog.text
+        assert observed == [True]
+        assert source.exists() and not (right / "file").exists()
+        assert str(source) in app._panel("left").marked
+
+
+async def test_conflict_summary_is_bounded_and_lists_duplicates(roots):
+    left, right = roots
+    sources = []
+    for index in range(8):
+        sources.append(str(write(left / str(index), mtime=300)))
+        write(right / str(index), "old", 100)
+    other = write(left / "sub" / "0")
+    sources.append(str(other))
+    report = detect_conflicts(sources, str(right))
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        app.push_screen(ConflictScreen(report, str(right), OpKind.COPY))
+        dialog = await screen(pilot, ConflictScreen)
+        text = str(dialog.query_one("#conflict-summary").render())
+        assert "... and 3 more" in text and "Repeated source names: 0" in text
+        assert "Source:" in text and "Destination:" in text and "newer: src" in text
+
+
+async def test_f6_folder_partial_skip_keeps_folder_marked(roots, isolated_trash):
+    left, right = roots
+    retained = write(left / "folder" / "keep")
+    moved = write(left / "folder" / "missing")
+    write(right / "folder" / "keep", "old", 100)
+    write(right / "folder" / "extra", "extra")
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f6")
+        dialog = await screen(pilot, ConflictScreen)
+        assert "merge" not in dialog.options and "only_newer" not in dialog.options
+        await pilot.press("a")
+        await screen(pilot, ConflictScreen)
+        await pilot.press("s")
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert retained.read_text() == "new" and not moved.exists()
+        assert (right / "folder" / "missing").read_text() == "new"
+        assert (right / "folder" / "extra").read_text() == "extra"
+        assert str(left / "folder") in app._panel("left").marked
+
+
+async def test_f5_only_newer_older_source_stays_marked(roots):
+    left, right = roots
+    source = write(left / "file", mtime=100)
+    write(right / "file", "old", 300)
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f5")
+        await screen(pilot, ConflictScreen)
+        await pilot.press("n")
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert str(source) in app._panel("left").marked
+        assert (right / "file").read_text() == "old"
