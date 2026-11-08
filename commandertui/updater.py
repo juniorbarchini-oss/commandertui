@@ -98,7 +98,9 @@ def detect_install() -> str:
 # Arch: the PKGBUILD in the repo is only updated after a release is tagged
 # (its checksum can't exist before the tarball does), so take the one from the
 # release's own tag, point it at that version and let updpkgsums fill the
-# checksum from the real tarball, then build and install.
+# checksum from the real tarball, then build and install. --nocheck skips the
+# PKGBUILD's check() (the whole test suite, minutes on a slow machine): the
+# release workflow already ran those tests before publishing.
 _ARCH_SCRIPT = """set -e
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -106,7 +108,7 @@ cd "$tmp"
 curl -fsSL https://raw.githubusercontent.com/{repo}/v{latest}/packaging/arch/PKGBUILD -o PKGBUILD
 sed -i 's/^pkgver=.*/pkgver={latest}/; s/^pkgrel=.*/pkgrel=1/' PKGBUILD
 updpkgsums
-makepkg -si
+makepkg -si --nocheck
 """
 
 
