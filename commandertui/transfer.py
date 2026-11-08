@@ -1,0 +1,222 @@
+"""Plan conflict decisions, then execute atomic copies and verified moves.
+
+MERGE is selected by a top-level directory override. The default is always a
+per-file resolution. Reports count copied leaf files (including symlinks), and
+list skipped source paths. on_item(item, result) runs after each planned item.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from typing import Literal
+
+from . import sync
+from .conflicts import ConflictReport, Resolution, allowed_resolutions, rename_target, resolve
+from .models import EntryKind, OpKind
+from .scanner import scan_directory
+
+
+@dataclass
+class ConflictPolicy:
+    default: Resolution
+    overrides: dict[str, Resolution] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TransferItem:
+    src_abs: str
+    dst_abs: str
+    action: Literal["copy", "skip", "rename"]
+    replace_existing: bool = False
+    is_dir_whole: bool = False
+
+
+@dataclass
+class TransferPlan:
+    items: list[TransferItem] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    source_dirs: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TransferReport:
+    copied: int = 0
+    skipped: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+    cancelled: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return not self.failed and not self.cancelled
+
+
+def build_transfer_plan(
+    sources, dst_dir, kind: OpKind, report: ConflictReport, policy: ConflictPolicy
+) -> TransferPlan:
+    allowed = allowed_resolutions(kind)
+    if policy.default in (Resolution.MERGE, Resolution.CANCEL):
+        raise ValueError("default must be a per-file resolution, not MERGE or CANCEL")
+    if any(r not in allowed or r == Resolution.CANCEL for r in [policy.default, *policy.overrides.values()]):
+        raise ValueError(f"Invalid resolution for {kind}")
+    conflicts = {c.rel_path: c for c in report.conflicts}
+    plan = TransferPlan()
+    reserved: set[str] = set()
+
+    def renamed(dst):
+        candidate = rename_target(dst)
+        if candidate in reserved:
+            stem, ext = os.path.splitext(dst)
+            index = 1
+            while os.path.lexists(f"{stem}_{index}{ext}") or f"{stem}_{index}{ext}" in reserved:
+                index += 1
+            candidate = f"{stem}_{index}{ext}"
+        reserved.add(candidate)
+        return candidate
+
+    def add(src, dst, rel, whole=False):
+        conflict = conflicts.get(rel)
+        decision = policy.overrides.get(rel, policy.default)
+        if decision == Resolution.MERGE:
+            raise ValueError("MERGE requires a colliding directory")
+        exists = os.path.lexists(dst)
+        action = resolve(conflict, decision) if conflict else "skip" if exists else "copy"
+        if action == "rename":
+            dst = renamed(dst)
+        if action == "skip":
+            plan.skipped.append(src)
+        else:
+            if action != "rename" and dst in reserved:
+                raise ValueError(f"Multiple sources target {dst}")
+            reserved.add(dst)
+        plan.items.append(TransferItem(src, dst, action, exists and action == "copy", whole))
+
+    for source in sources:
+        src = os.path.abspath(source)
+        name = os.path.basename(src)
+        dst = os.path.abspath(os.path.join(dst_dir, name))
+        if src == dst or (
+            os.path.isdir(src)
+            and not os.path.islink(src)
+            and os.path.commonpath([os.path.realpath(src), os.path.realpath(dst)]) == os.path.realpath(src)
+        ):
+            raise ValueError("Destination must be outside the source")
+        whole = os.path.isdir(src) and not os.path.islink(src)
+        collision = whole and name in report.dir_collisions
+        decision = policy.overrides.get(name, policy.default)
+        if collision and decision == Resolution.RENAME:
+            plan.items.append(TransferItem(src, renamed(dst), "rename", False, True))
+            continue
+        descendants = any(key.startswith(name + "/") for key in policy.overrides)
+        if collision and decision == Resolution.SKIP and not descendants:
+            plan.items.append(TransferItem(src, dst, "skip", False, True))
+            plan.skipped.append(src)
+            continue
+        if not collision:
+            add(src, dst, name, whole)
+            continue
+        # Both directories exist: preserve destination-only entries, and apply
+        # the per-file policy. Empty directories are explicit items too.
+        plan.source_dirs.append(src)
+        blocked = []
+        for path, entry in scan_directory(src).items():
+            if any(path.startswith(parent + "/") for parent in blocked):
+                continue
+            rel = f"{name}/{path}"
+            target = os.path.join(dst, path)
+            if entry.kind == EntryKind.DIR and rel not in conflicts:
+                plan.source_dirs.append(os.path.join(src, path))
+                if not os.path.lexists(target):
+                    add(os.path.join(src, path), target, rel, True)
+                    blocked.append(path)
+                continue
+            add(os.path.join(src, path), target, rel, entry.kind == EntryKind.DIR)
+            if entry.kind == EntryKind.DIR:
+                blocked.append(path)
+    return plan
+
+
+def execute_transfer_plan(
+    plan: TransferPlan, kind: OpKind, progress=None, cancel_check=None, on_item=None
+) -> TransferReport:
+    """Copy leaves atomically; MOVE trashes each source only after verification.
+
+    No rename fast path is used, so cancellation and verification have the same
+    behavior across filesystems. Existing same-kind trees are merged; only type
+    mismatches require trashing the destination. Empty source dirs use rmdir.
+    """
+    if kind not in (OpKind.COPY, OpKind.MOVE):
+        raise ValueError(f"Unsupported operation: {kind}")
+    report = TransferReport()
+    cleanup: set[str] = set()
+
+    def cancelled():
+        if cancel_check and cancel_check():
+            report.cancelled = True
+            return True
+        return False
+
+    def transfer(src, dst, replace_existing):
+        if cancelled():
+            return
+        try:
+            src_dir = os.path.isdir(src) and not os.path.islink(src)
+            dst_exists = os.path.lexists(dst)
+            dst_dir = os.path.isdir(dst) and not os.path.islink(dst)
+            if os.path.realpath(src) == os.path.realpath(dst):
+                raise ValueError("Source and destination refer to the same path")
+            if dst_exists and not replace_existing:
+                raise FileExistsError(dst)
+            if dst_exists and (src_dir != dst_dir or os.path.islink(src) or os.path.islink(dst)):
+                if not sync.send_to_trash(dst):
+                    raise OSError("Could not trash existing destination")
+            if src_dir:
+                os.makedirs(dst, exist_ok=True)
+                if kind == OpKind.MOVE:
+                    cleanup.add(src)
+                with os.scandir(src) as entries:
+                    children = sorted(entries, key=lambda e: e.name)
+                for entry in children:
+                    transfer(entry.path, os.path.join(dst, entry.name), replace_existing)
+                    if report.cancelled:
+                        break
+                return
+            result = sync.copy_item(src, dst, progress, cancel_check)
+            if result.cancelled:
+                report.cancelled = True
+                return
+            if not result.ok:
+                raise OSError(result.error)
+            if kind == OpKind.MOVE:
+                verified = (
+                    os.path.islink(dst) and os.readlink(src) == os.readlink(dst)
+                    if os.path.islink(src)
+                    else sync.verify_copy(src, dst)
+                )
+                if not verified:
+                    raise OSError("Copy verification failed; source retained")
+                if not sync.send_to_trash(src):
+                    raise OSError("Copied but could not trash source")
+            report.copied += 1
+        except Exception as error:
+            report.failed.append((src, str(error)))
+
+    for item in plan.items:
+        if cancelled():
+            break
+        if item.action == "skip":
+            report.skipped.append(item.src_abs)
+        else:
+            transfer(item.src_abs, item.dst_abs, item.replace_existing)
+        if on_item:
+            on_item(item, report)
+        if report.cancelled:
+            break
+    if kind == OpKind.MOVE and report.ok:
+        cleanup.update(plan.source_dirs)
+        for directory in sorted(cleanup, key=lambda p: p.count(os.sep), reverse=True):
+            try:
+                os.rmdir(directory)  # succeeds only when empty; never recursive
+            except OSError:
+                pass
+    return report
