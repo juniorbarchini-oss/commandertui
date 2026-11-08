@@ -241,3 +241,20 @@ first version, **Claude Opus 5.5** did most of v0.2 and the v1.0 packaging.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+
+## Copy/move conflicts
+
+F5 (Copy) and F6 (Move) check the destination before transferring. Existing
+items open a dialog focused on **Skip**: overwrite, skip, rename, or ask for
+each conflict (with **Apply to all remaining**). Copy also offers **Only newer**
+and **Merge** for existing folders; Merge asks how to handle conflicting files.
+Overwrite on folders keeps destination-only files. Repeated source names use
+the same policy; rename selects free `_1`, `_2`, … names.
+
+Transfers run with cancellable progress. Skipped and unfinished sources stay
+marked. Moves verify each copied file before trashing its source; skipped
+and failed files stay in the source. Existing files always require a decision,
+even when size and date match: Overwrite copies/moves them, while Skip (or
+Only newer for identical files) retains them. The completion message reports
+copied, skipped, failed, and identical files retained by a move.
