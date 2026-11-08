@@ -652,7 +652,7 @@ class UpdateScreen(ModalScreen[str]):
         margin-top: 1;
     }
     #update-buttons Button {
-        min-width: 18;
+        min-width: 16;
         margin: 0 1;
     }
     """
@@ -663,8 +663,9 @@ class UpdateScreen(ModalScreen[str]):
     ]
 
     HOW = {
-        "pacman": "Installed as an Arch package: this rebuilds it with makepkg -si.\n"
-        "Your sudo password is typed in the terminal, not here.",
+        "pacman": "Installed as an Arch package: this downloads the release and rebuilds it "
+        "with makepkg (a few seconds). The terminal asks for your sudo password to "
+        "install it; it is typed there, not here.",
         "pipx": "Installed with pipx: this runs  pipx upgrade commandertui.",
         "pip": "Installed with pip: this runs  pip install --upgrade commandertui.",
         "source": "You are running from a git checkout.\nUpdate it yourself with  git pull.",
@@ -685,7 +686,7 @@ class UpdateScreen(ModalScreen[str]):
                 if self.info.install != "source":
                     yield Button("Update now", id="now")
                 yield Button("Later  (Esc)", id="later")
-                yield Button("Skip this version  (s)", id="skip")
+                yield Button("Skip  (s)", id="skip")
 
     def on_mount(self) -> None:
         self.query_one("#now" if self.info.install != "source" else "#later", Button).focus()
