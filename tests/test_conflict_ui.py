@@ -213,8 +213,8 @@ async def test_f6_identical_message_and_marks(roots, isolated_trash, monkeypatch
     async with app.run_test(size=(140, 40)) as pilot:
         await main(pilot)
         await pilot.press("down", "space", "f6")
-        await screen(pilot, ConfirmScreen)
-        await pilot.press("y")
+        await screen(pilot, ConflictScreen)
+        await pilot.press("s")
         from commandertui.main_screen import MainScreen
 
         await screen(pilot, MainScreen)
@@ -335,3 +335,78 @@ async def test_f5_only_newer_older_source_stays_marked(roots):
         await screen(pilot, MainScreen)
         assert str(source) in app._panel("left").marked
         assert (right / "file").read_text() == "old"
+
+
+@pytest.mark.parametrize("folder", [False, True])
+async def test_f5_identical_files_always_prompt(roots, folder):
+    left, right = roots
+    src_root = left / "folder" if folder else left
+    dst_root = right / "folder" if folder else right
+    for name in ("a", "b"):
+        write(src_root / name, "new", 100)
+        write(dst_root / name, "old", 100)
+    if not folder:
+        write(src_root / "c", "new", 100)
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        marked = [str(left / "folder")] if folder else [str(left / name) for name in ("a", "b", "c")]
+        app._panel("left").marked.update(marked)
+        await pilot.press("f5")
+        dialog = await screen(pilot, ConflictScreen)
+        title = str(dialog.query_one("#conflict-title").render())
+        summary = str(dialog.query_one("#conflict-summary").render())
+        assert "2 identical: same size and date" in title
+        assert summary.count("— identical") == 2 and "newer:" not in summary
+        assert dialog.focused.id == "conflict-skip"
+        await pilot.press("s")
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert all((dst_root / name).read_text() == "old" for name in ("a", "b"))
+        if not folder:
+            assert (right / "c").read_text() == "new"
+            assert app._panel("left").marked == {str(left / "a"), str(left / "b")}
+        else:
+            assert str(src_root) in app._panel("left").marked
+
+
+async def test_f6_identical_overwrite_moves_source(roots, isolated_trash):
+    left, right = roots
+    source = write(left / "file", "new", 100)
+    write(right / "file", "old", 100)
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f6")
+        dialog = await screen(pilot, ConflictScreen)
+        assert dialog.report_data.conflicts[0].identical
+        await pilot.press("o")
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert not source.exists() and not app._panel("left").marked
+        assert (right / "file").read_text() == "new"
+
+
+async def test_ask_each_includes_identical(roots):
+    left, right = roots
+    source = write(left / "file", "new", 100)
+    write(right / "file", "old", 100)
+    app = CommanderApp(str(left), str(right))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await main(pilot)
+        await pilot.press("down", "space", "f5")
+        await screen(pilot, ConflictScreen)
+        await pilot.press("a")
+        dialog = await screen(pilot, ConflictScreen)
+        assert dialog.rel_path == "file" and "— identical" in str(
+            dialog.query_one("#conflict-summary").render()
+        )
+        await pilot.press("r")
+        from commandertui.main_screen import MainScreen
+
+        await screen(pilot, MainScreen)
+        assert (right / "file_1").read_text() == "new"
+        assert (right / "file").read_text() == "old"
+        assert source.exists()

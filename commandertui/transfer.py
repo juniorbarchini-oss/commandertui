@@ -3,7 +3,7 @@
 MERGE is selected by a top-level directory override. The default is always a
 per-file resolution. Reports count copied leaf files (including symlinks), and
 list skipped source paths. identical_kept_paths contains absolute source paths
-skipped as metadata-identical; identical_kept counts those paths. The execution
+kept by an explicit skip policy; identical_kept counts those paths. The execution
 report counts only reached items, including when cancelled.
 on_item(item, result) runs after each planned item.
 """
@@ -101,6 +101,8 @@ def build_transfer_plan(
         if decision == Resolution.MERGE:
             raise ValueError("MERGE requires a colliding directory")
         exists = os.path.lexists(dst)
+        # An unreported existing target can only be a race/stale report.
+        # Refuse to overwrite it without an explicit conflict decision.
         action = resolve(conflict, decision) if conflict else "skip" if exists else "copy"
         if dst in reserved and action != "skip":
             if decision == Resolution.RENAME:
@@ -121,9 +123,6 @@ def build_transfer_plan(
             dst = renamed(dst)
         if action == "skip":
             plan.skipped.append(src)
-            if src in identical_paths:
-                plan.identical_kept_paths.append(src)
-                plan.identical_kept += 1
         else:
             reserved.add(dst)
         plan.items.append(TransferItem(src, dst, action, exists and action == "copy", whole))
@@ -180,6 +179,19 @@ def build_transfer_plan(
             add(os.path.join(src, path), target, rel, entry.kind == EntryKind.DIR)
             if entry.kind == EntryKind.DIR:
                 blocked.append(path)
+    # Include explicit whole-folder skips and duplicate-source decisions too.
+    plan.identical_kept_paths = list(
+        dict.fromkeys(
+            path
+            for path in report.identical_paths
+            if any(
+                item.action == "skip"
+                and (item.src_abs == path or item.is_dir_whole and path.startswith(item.src_abs + os.sep))
+                for item in plan.items
+            )
+        )
+    )
+    plan.identical_kept = len(plan.identical_kept_paths)
     return plan
 
 
@@ -257,9 +269,15 @@ def execute_transfer_plan(
             break
         if item.action == "skip":
             report.skipped.append(item.src_abs)
-            if item.src_abs in plan.identical_kept_paths:
-                report.identical_kept += 1
-                report.identical_kept_paths.append(item.src_abs)
+            kept = [
+                path
+                for path in plan.identical_kept_paths
+                if path == item.src_abs or item.is_dir_whole and path.startswith(item.src_abs + os.sep)
+            ]
+            report.identical_kept_paths.extend(
+                path for path in kept if path not in report.identical_kept_paths
+            )
+            report.identical_kept = len(report.identical_kept_paths)
         else:
             transfer(item.src_abs, item.dst_abs, item.replace_existing)
         if on_item:

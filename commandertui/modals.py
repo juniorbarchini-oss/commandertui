@@ -761,11 +761,13 @@ class ConflictScreen(ModalScreen):
             else (
                 "Choose a policy for conflicting files"
                 if self.file_policy
-                else f"{count} items already exist in {self.dst_dir}"
+                else f"{count} items already exist"
             )
         )
         if report.identical:
-            title += f" — {report.identical} identical, skipped"
+            title += f" ({report.identical} identical: same size and date)"
+        if not self.rel_path and not self.file_policy:
+            title += f" in {self.dst_dir}"
         entries = report.conflicts
         if self.rel_path:
             entries = [c for c in entries if c.rel_path == self.rel_path]
@@ -776,9 +778,10 @@ class ConflictScreen(ModalScreen):
                 date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry.mtime))
                 return f"{label}: {_human_bytes(entry.size)}, {date}"
 
+            label = "identical" if conflict.identical else f"newer: {conflict.newer}"
             lines.append(
                 f"{conflict.rel_path}: {side(conflict.src, 'Source')} | "
-                f"{side(conflict.dst, 'Destination')} — newer: {conflict.newer}"
+                f"{side(conflict.dst, 'Destination')} — {label}"
             )
         if len(entries) > 6:
             lines.append(f"... and {len(entries) - 6} more")

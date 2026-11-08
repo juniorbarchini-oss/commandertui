@@ -363,7 +363,7 @@ def test_real_identical_kept(real_roots, kind):
     src, dst = real_roots
     source = write(src / "file", "same")
     write(dst / "file", "same")
-    plan = plan_for(source, dst, kind=kind)
+    plan = plan_for(source, dst, Resolution.SKIP, kind=kind)
     assert plan.identical_kept == 1
     assert plan.identical_kept_paths == [str(source)]
     report = execute_transfer_plan(plan, kind)
@@ -378,7 +378,7 @@ def test_nested_identical_kept(real_roots, kind):
     src, dst = real_roots
     source = write(src / "folder" / "nested" / "file", "same")
     write(dst / "folder" / "nested" / "file", "same")
-    plan = plan_for(src / "folder", dst, kind=kind)
+    plan = plan_for(src / "folder", dst, Resolution.SKIP, kind=kind)
     assert plan.identical_kept_paths == [str(source)]
     report = execute_transfer_plan(plan, kind)
     assert report.ok and report.identical_kept == 1
@@ -442,7 +442,9 @@ def test_identical_kept_not_counted_before_cancel(real_roots):
     src, dst = real_roots
     source = write(src / "file")
     write(dst / "file")
-    report = execute_transfer_plan(plan_for(source, dst), OpKind.COPY, cancel_check=lambda: True)
+    plan = plan_for(source, dst, Resolution.SKIP)
+    assert plan.identical_kept == 1
+    report = execute_transfer_plan(plan, OpKind.COPY, cancel_check=lambda: True)
     assert report.cancelled and report.identical_kept == 0 and report.identical_kept_paths == []
 
 
@@ -480,3 +482,66 @@ def test_isolated_trash_preserves_broken_link_collisions(real_roots):
     assert not os.path.lexists(link)
     assert os.readlink(trash_dir / "link") == "missing-first"
     assert os.readlink(trash_dir / "link_1") == "missing-second"
+
+
+@pytest.mark.parametrize(
+    "resolution,expected_copied,expected_kept",
+    [
+        (Resolution.SKIP, 1, 2),
+        (Resolution.OVERWRITE, 3, 0),
+        (Resolution.ONLY_NEWER, 1, 2),
+        (Resolution.RENAME, 3, 0),
+    ],
+)
+def test_three_files_with_identical_metadata(real_roots, resolution, expected_copied, expected_kept):
+    src, dst = real_roots
+    sources = [write(src / name, "new", 100) for name in ("a", "b", "c")]
+    # Same size and mtime, different content: a real overwrite must be observable.
+    for name in ("a", "b"):
+        write(dst / name, "old", 100)
+    paths = [str(path) for path in sources]
+    detection = detect_conflicts(paths, str(dst))
+    assert detection.identical == 2 and len(detection.conflicts) == 2
+    plan = build_transfer_plan(paths, str(dst), OpKind.COPY, detection, ConflictPolicy(resolution))
+    assert plan.identical_kept == expected_kept
+    report = execute_transfer_plan(plan, OpKind.COPY)
+    assert report.ok and report.copied == expected_copied and report.identical_kept == expected_kept
+    assert (dst / "c").read_text() == "new"
+    for name in ("a", "b"):
+        assert (dst / name).read_text() == ("new" if resolution == Resolution.OVERWRITE else "old")
+        if resolution == Resolution.RENAME:
+            assert (dst / f"{name}_1").read_text() == "new"
+    assert all(path.read_text() == "new" for path in sources)
+
+
+@pytest.mark.parametrize("resolution", [Resolution.OVERWRITE, Resolution.SKIP])
+def test_move_identical_files_real_trash(real_roots, resolution):
+    src, dst = real_roots
+    sources = [write(src / name, "new", 100) for name in ("a", "b")]
+    for name in ("a", "b"):
+        write(dst / name, "old", 100)
+    paths = [str(path) for path in sources]
+    detection = detect_conflicts(paths, str(dst))
+    plan = build_transfer_plan(paths, str(dst), OpKind.MOVE, detection, ConflictPolicy(resolution))
+    report = execute_transfer_plan(plan, OpKind.MOVE)
+    assert report.ok
+    if resolution == Resolution.OVERWRITE:
+        assert report.copied == 2 and report.identical_kept == 0
+        assert list(src.iterdir()) == []
+        assert all((dst / name).read_text() == "new" for name in ("a", "b"))
+    else:
+        assert report.copied == 0 and report.identical_kept == 2
+        assert all(path.read_text() == "new" for path in sources)
+
+
+@pytest.mark.parametrize("resolution", [Resolution.SKIP, Resolution.ONLY_NEWER, Resolution.OVERWRITE])
+def test_merge_identical_files_obeys_default(real_roots, resolution):
+    src, dst = real_roots
+    source = write(src / "folder" / "file", "new", 100)
+    write(dst / "folder" / "file", "old", 100)
+    plan = plan_for(source.parent, dst, resolution, overrides={"folder": Resolution.MERGE})
+    report = execute_transfer_plan(plan, OpKind.COPY)
+    overwrite = resolution == Resolution.OVERWRITE
+    assert report.ok and report.copied == int(overwrite)
+    assert report.identical_kept == int(not overwrite)
+    assert (dst / "folder" / "file").read_text() == ("new" if overwrite else "old")

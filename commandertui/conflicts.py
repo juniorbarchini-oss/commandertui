@@ -2,7 +2,8 @@
 
 Identity is metadata-based, not a content comparison: SMB/GVFS can report
 misleading sizes/mtimes. As in diff.py, equal sizes and mtimes within two
-seconds count as identical; size differences still count as conflicts.
+seconds count as identical. Every existing file is still a conflict requiring
+an explicit resolution, including metadata-identical files.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ class Conflict:
     dst: FileEntry
     kind_mismatch: bool
     newer: Literal["src", "dst", "same"]
+    identical: bool = False
 
 
 @dataclass
@@ -124,13 +126,13 @@ def detect_conflicts(sources: list[str], dst_dir: str, cancel_check=None) -> Con
         mismatch = src.kind != dst.kind
         delta = src.mtime - dst.mtime
         newer = "same" if abs(delta) <= MTIME_TOLERANCE_SECONDS else "src" if delta > 0 else "dst"
-        if not mismatch and src.size == dst.size and newer == "same":
+        identical = not mismatch and src.size == dst.size and newer == "same"
+        if identical:
             report.identical += 1
             report.identical_paths.append(src_abs)
-        else:
-            conflict = Conflict(src.rel_path, src.name, src, dst, mismatch, newer)
-            report.conflicts.append(conflict)
-            report.conflicts_by_source[src_abs] = conflict
+        conflict = Conflict(src.rel_path, src.name, src, dst, mismatch, newer, identical)
+        report.conflicts.append(conflict)
+        report.conflicts_by_source[src_abs] = conflict
 
     for source in sources:
         if cancelled():

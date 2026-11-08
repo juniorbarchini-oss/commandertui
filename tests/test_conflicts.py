@@ -57,7 +57,12 @@ def test_identical_and_mtime_tolerance(roots, delta):
     write(dst / "file", mtime=100 + delta)
     report = detect_conflicts([str(source)], str(dst))
     assert report.identical == 1
-    assert not report.has_conflicts
+    assert report.has_conflicts
+    assert len(report.conflicts) == 1
+    conflict = report.conflicts[0]
+    assert conflict.identical and conflict.newer == "same"
+    assert report.conflicts_by_source[str(source)] is conflict
+    assert report.identical_paths == [str(source)]
 
 
 @pytest.mark.parametrize("delta,newer", [(2.1, "dst"), (-2.1, "src")])
@@ -89,7 +94,8 @@ def test_directory_merge_inventory(roots):
     report = detect_conflicts([str(src / "folder")], str(dst))
     assert report.dir_collisions == ["folder"]
     assert report.identical == report.total_src_files_new == 1
-    assert [c.rel_path for c in report.conflicts] == ["folder/nested/changed"]
+    assert [c.rel_path for c in report.conflicts] == ["folder/nested/changed", "folder/same"]
+    assert [c.identical for c in report.conflicts] == [False, True]
 
 
 def test_new_directory_counts_files(roots):
@@ -195,3 +201,15 @@ def test_symlink_to_directory_is_not_traversed(roots):
     report = detect_conflicts([str(src / "link")], str(dst))
     assert report.conflicts[0].src.kind == EntryKind.SYMLINK
     assert report.conflicts[0].kind_mismatch
+
+
+def test_identical_symlinks_are_conflicts(roots):
+    src, dst = roots
+    (src / "link").symlink_to("missing")
+    (dst / "link").symlink_to("missing")
+    for path in (src / "link", dst / "link"):
+        os.utime(path, (100, 100), follow_symlinks=False)
+    report = detect_conflicts([str(src / "link")], str(dst))
+    assert report.has_conflicts and report.identical == 1
+    assert report.conflicts[0].identical
+    assert report.conflicts[0].src.kind == EntryKind.SYMLINK

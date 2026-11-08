@@ -253,6 +253,8 @@ Overwrite on folders keeps destination-only files. Repeated source names use
 the same policy; rename selects free `_1`, `_2`, … names.
 
 Transfers run with cancellable progress. Skipped and unfinished sources stay
-marked. Moves verify each copied file before trashing its source; skipped,
-failed, and identical files stay in the source. The completion message reports
+marked. Moves verify each copied file before trashing its source; skipped
+and failed files stay in the source. Existing files always require a decision,
+even when size and date match: Overwrite copies/moves them, while Skip (or
+Only newer for identical files) retains them. The completion message reports
 copied, skipped, failed, and identical files retained by a move.
