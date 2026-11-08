@@ -189,6 +189,18 @@ def installed_version() -> str | None:
         return None
 
 
+def update_notice(info: UpdateInfo) -> str:
+    """What the user sees in the terminal before the upgrade command starts, so a
+    silent wait (or the sudo prompt) does not look like a hang."""
+    head = f"Updating CommanderTUI {info.current} -> {info.latest} ({info.install})."
+    if info.install == "pacman":
+        return (
+            f"{head}\nDownloading the release and building the package; this takes a few seconds.\n"
+            "At the end it asks for your sudo password once, to install it.\n"
+        )
+    return f"{head}\nDownloading and installing; this can take a moment.\n"
+
+
 def run_update(info: UpdateInfo) -> bool:
     """Run the upgrade attached to the real terminal. True only if it exited 0 AND the
     new version is really installed: a package manager can exit 0 with "already up to date"
@@ -196,6 +208,7 @@ def run_update(info: UpdateInfo) -> bool:
     command = update_command(info.install, info.latest)
     if command is None:
         return False
+    print(update_notice(info), flush=True)
     if subprocess.run(command).returncode != 0:
         return False
     now = installed_version()

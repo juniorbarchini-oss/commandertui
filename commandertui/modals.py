@@ -663,8 +663,9 @@ class UpdateScreen(ModalScreen[str]):
     ]
 
     HOW = {
-        "pacman": "Installed as an Arch package: this rebuilds it with makepkg -si.\n"
-        "Your sudo password is typed in the terminal, not here.",
+        "pacman": "Installed as an Arch package: this downloads the release and rebuilds it\n"
+        "with makepkg (a few seconds). The terminal will ask for your sudo\n"
+        "password once, to install; it is typed there, not here.",
         "pipx": "Installed with pipx: this runs  pipx upgrade commandertui.",
         "pip": "Installed with pip: this runs  pip install --upgrade commandertui.",
         "source": "You are running from a git checkout.\nUpdate it yourself with  git pull.",

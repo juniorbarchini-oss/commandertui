@@ -148,3 +148,25 @@ def test_run_update_fails_on_nonzero_exit_without_checking_version(monkeypatch):
     monkeypatch.setattr(updater, "installed_version", lambda: "2.0.0")
     assert updater.run_update(_info()) is False
     assert updater.run_update(_info(install="source")) is False
+
+
+def test_update_notice_explains_the_wait_and_the_sudo_prompt():
+    arch = updater.update_notice(_info(install="pacman"))
+    assert "1.0.0" in arch and "2.0.0" in arch  # from -> to
+    assert "few seconds" in arch and "sudo password once" in arch
+    assert "sudo" not in updater.update_notice(_info(install="pipx"))
+
+
+def test_run_update_prints_the_notice_before_running_the_command(monkeypatch, capsys):
+    import subprocess
+
+    order = []
+    monkeypatch.setattr(
+        updater.subprocess,
+        "run",
+        lambda cmd, **kw: order.append("run") or subprocess.CompletedProcess(cmd, 0),
+    )
+    monkeypatch.setattr(updater, "installed_version", lambda: "2.0.0")
+    assert updater.run_update(_info(install="pacman")) is True
+    assert "Updating CommanderTUI" in capsys.readouterr().out
+    assert order == ["run"]
