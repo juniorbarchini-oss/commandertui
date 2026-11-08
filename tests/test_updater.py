@@ -75,7 +75,7 @@ def test_update_commands_per_install_kind():
     assert arch[:2] == ["bash", "-c"]
     script = arch[2]
     assert "v2.0.0/packaging/arch/PKGBUILD" in script and "pkgver=2.0.0" in script
-    assert "updpkgsums" in script and "makepkg -si" in script
+    assert "updpkgsums" in script and "makepkg -si --nocheck" in script  # tests ran in the release workflow
     assert "sudo" not in script  # the password is only ever asked by makepkg, in the terminal
 
 
