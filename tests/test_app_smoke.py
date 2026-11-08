@@ -1340,3 +1340,24 @@ async def test_places_change_login_resets_and_reconnects(tmp_path, monkeypatch):
         await pilot.pause()
         assert seen == {"reset": "smb://nas/HD1/", "mount": ("smb://nas/HD1/", True)}
         assert netlocations.is_anonymous("smb://nas/HD1/")
+
+
+async def test_boot_hint_is_centered_under_the_art(tmp_path):
+    from commandertui.app import CommanderApp
+
+    app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    async with app.run_test(size=(140, 40)) as pilot:
+        screen = app.screen
+        assert screen.__class__.__name__ == "BootScreen"
+        screen.chars_per_tick = 100000  # draw the whole art on the next tick
+        for _ in range(200):  # let the reveal finish: the hint only appears once drawn
+            if screen._done:
+                break
+            await pilot.pause(0.05)
+        assert screen._done
+        await pilot.pause()
+        art = screen.query_one("#boot-text").region
+        hint = screen.query_one("#boot-hint")
+        assert "ENTER" in str(hint.render())
+        assert hint.region.width == art.width
+        assert hint.region.x == art.x

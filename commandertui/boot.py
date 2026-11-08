@@ -3,6 +3,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
+from textual.containers import Vertical
 from textual.widgets import Static
 
 from .ascii_font import banner
@@ -65,8 +66,15 @@ class BootScreen(Screen):
         width: auto;
         height: auto;
     }
-    #boot-hint {
+    #boot-box {
         width: auto;
+        height: auto;
+    }
+    #boot-hint {
+        /* 100% of the box, which is as wide as the art: text-align can then
+           really center the hint under it (width:auto hugged the text and
+           left it at the art's left edge). */
+        width: 100%;
         height: auto;
         text-align: center;
         margin-top: 1;
@@ -100,8 +108,9 @@ class BootScreen(Screen):
         # boxed art rendered flush against the left edge instead. `width:
         # auto` on the Static itself (set in DEFAULT_CSS) is what lets the
         # screen's own `align: center middle` actually center it as a block.
-        yield Static("", id="boot-text")
-        yield Static("", id="boot-hint")
+        with Vertical(id="boot-box"):
+            yield Static("", id="boot-text")
+            yield Static("", id="boot-hint")
 
     def on_mount(self) -> None:
         # Double-size title when the window is wide enough for it.

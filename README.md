@@ -164,7 +164,7 @@ the command that matches how it was installed:
 
 | Installed as | Update runs |
 |---|---|
-| Arch package (`makepkg`) | rebuilds from the release's PKGBUILD with `makepkg -si` (your sudo password is typed in the terminal, never read by the app) |
+| Arch package (`makepkg`) | rebuilds from the release's PKGBUILD with `makepkg -si --nocheck` (tests already ran in the release workflow) (your sudo password is typed in the terminal, never read by the app) |
 | pipx | `pipx upgrade commandertui` |
 | pip | `pip install --upgrade commandertui` |
 | git checkout | no button: the dialog tells you to `git pull` |
