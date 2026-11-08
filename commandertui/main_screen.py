@@ -24,6 +24,7 @@ from .modals import (
 )
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
+from .run_transfer import run_transfer
 from .scanner import path_size
 from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
 
@@ -493,25 +494,7 @@ class MainScreen(Screen):
             self._nothing_selected()
             return
 
-        side = OpSide.LEFT_TO_RIGHT if src_panel.side == "left" else OpSide.RIGHT_TO_LEFT
-        queue = OperationQueue()
-        for item in items:
-            rel_path = os.path.relpath(item, src_panel.path)
-            queue.add(QueuedOp(kind, side, rel_path, os.path.isdir(item), size=path_size(item)))
-
-        def after(report) -> None:
-            src_panel.marked.clear()
-            src_panel.refresh_listing()
-            dst_panel.refresh_listing()
-
-        run_queue_with_progress(
-            self,
-            f"{label} to {dst_panel.path}",
-            queue,
-            self._panel("left").path,
-            self._panel("right").path,
-            after,
-        )
+        run_transfer(self, kind, label, src_panel, dst_panel, items)
 
     # ------------------------------------------------------------- misc
     def action_show_compare(self) -> None:
