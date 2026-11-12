@@ -237,7 +237,7 @@ async def test_f8_remote_warns_and_defaults_to_cancel(tmp_path, monkeypatch, con
     remote.mkdir()
     local.mkdir()
     file = remote / "file"
-    file.write_text("data")
+    file.write_bytes(b"x" * (2 * 1024 * 1024))
     mounts_file(tmp_path, monkeypatch, [("server", remote, "fuse.gvfsd-fuse")])
     backend = Mock(side_effect=AssertionError("remote DELETE must not enter trash"))
     monkeypatch.setattr(sync, "send_to_trash", backend)
@@ -249,6 +249,8 @@ async def test_f8_remote_warns_and_defaults_to_cancel(tmp_path, monkeypatch, con
         assert isinstance(app.screen, ConfirmScreen)
         assert app.screen.focused.id == "no"
         assert "network location" in app.screen.title_text
+        assert "Local items" not in app.screen.title_text
+        assert "2.0 MB total" in str(app.screen.query_one("#confirm-summary").render())
         assert "permanently" in app.screen.title_text
         assert "Delete permanently" in str(app.screen.query_one("#yes").label)
         await pilot.click("#yes" if confirm else "#no")
@@ -279,6 +281,8 @@ async def test_mixed_delete_uses_local_trash_and_remote_permanent_removal(tmp_pa
         await pilot.press("f8")
         await pilot.pause()
         assert app.screen.focused.id == "no"
+        assert "Local items will go to the trash." in app.screen.title_text
+        assert "total" not in str(app.screen.query_one("#confirm-summary").render())
         await pilot.click("#yes")
         await pilot.pause()
         await app.workers.wait_for_complete()
@@ -427,3 +431,71 @@ def test_archive_replacement_dialog_warns_and_cancel_preserves_data(tmp_path, mo
     assert screen.options[screen.initial] == "Cancel"
     callback("Cancel")
     assert existing.read_text() == "keep until confirmed"
+
+
+@pytest.mark.parametrize(
+    "entry,expected",
+    [
+        ("smb-share:server=192.168.100.14,share=hd1", "smb://192.168.100.14/hd1"),
+        ("smb-share:server=nas,share=My%20Files", "smb://nas/My%20Files"),
+        ("sftp:host=files.example,port=2222,user=private", "sftp://files.example:2222"),
+        ("ftp:host=files.example,user=private", "ftp://files.example"),
+        ("dav:host=files.example,prefix=%2Fshared", "dav://files.example/shared"),
+        ("dav:host=files.example,ssl=true,prefix=%2Fshared", "davs://files.example/shared"),
+        ("sftp:host=2001:db8::1,port=22", "sftp://[2001:db8::1]:22"),
+    ],
+)
+def test_gvfs_location_uses_connection_uri(tmp_path, monkeypatch, entry, expected):
+    gvfs = tmp_path / "gvfs"
+    mounts_file(tmp_path, monkeypatch, [("gvfsd-fuse", gvfs, "fuse.gvfsd-fuse")])
+    assert trash.remote_location(str(gvfs / entry / "folder" / "file")) == expected
+    assert trash.remote_location(str(gvfs / entry)) == expected
+
+
+@pytest.mark.parametrize(
+    "fs,label",
+    [
+        ("fuse.rclone", "rclone"),
+        ("cifs", "cifs"),
+        ("nfs", "nfs"),
+        ("fuse.sshfs", "sshfs"),
+        ("future-fs", "future-fs"),
+    ],
+)
+def test_other_remote_locations_show_mount_and_type(tmp_path, monkeypatch, fs, label):
+    mount = tmp_path / "mounted"
+    mounts_file(tmp_path, monkeypatch, [("remote", mount, fs)])
+    assert trash.remote_location(str(mount / "file")) == f"{mount} ({label})"
+
+
+@pytest.mark.asyncio
+async def test_remote_directory_confirmation_omits_unknown_size(tmp_path, monkeypatch):
+    local = tmp_path / "local"
+    gvfs = tmp_path / "gvfs"
+    connection = gvfs / "smb-share:server=192.168.100.14,share=hd1"
+    folder = connection / "folder"
+    folder.mkdir(parents=True)
+    local.mkdir()
+    (folder / "large-file").write_bytes(b"x" * 1024)
+    mounts_file(tmp_path, monkeypatch, [("gvfsd-fuse", gvfs, "fuse.gvfsd-fuse")])
+    app = CommanderApp(left_path=str(connection), right_path=str(local))
+    async with app.run_test(size=(120, 40)) as pilot:
+        await main_ready(pilot)
+        await pilot.press("down", "f8")
+        await pilot.pause()
+        assert "smb://192.168.100.14/hd1" in app.screen.title_text
+        assert "Local items" not in app.screen.title_text
+        assert "total" not in str(app.screen.query_one("#confirm-summary").render())
+        await pilot.press("enter")  # Cancel remains the default.
+        await pilot.pause()
+    assert (folder / "large-file").exists()
+
+
+def test_queue_summary_does_not_present_partial_bytes_as_total():
+    queue = OperationQueue(
+        [
+            QueuedOp(OpKind.DELETE, OpSide.LEFT, "known", False, size=2048),
+            QueuedOp(OpKind.DELETE, OpSide.LEFT, "unknown", False, size=None),
+        ]
+    )
+    assert queue.summary()["total_bytes"] is None

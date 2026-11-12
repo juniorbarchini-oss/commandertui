@@ -310,3 +310,9 @@ The local trash fallback uses a same-filesystem rename only. An `EXDEV` error
 fails safely instead of downloading or copying data across filesystems.
 Cancelling stops subsequent operations; completed permanent deletions cannot
 be undone. A completed or failed worker always closes its progress screen.
+
+Delete confirmations show GVFS connection URIs (for example
+`smb://server/share`) or the mount path and filesystem type. The extra note about
+local items going to trash appears only for mixed selections. File sizes come from metadata; folder or
+unreadable sizes stay unknown and suppress the total instead of showing zero
+or scanning a remote tree before confirmation.

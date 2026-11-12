@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 
 from textual.app import ComposeResult
@@ -479,7 +480,13 @@ class MainScreen(Screen):
         queue = OperationQueue()
         for item in items:
             rel_path = os.path.relpath(item, src_panel.path)
-            queue.add(QueuedOp(OpKind.DELETE, side, rel_path, os.path.isdir(item)))
+            try:
+                info = os.lstat(item)
+                is_dir = stat.S_ISDIR(info.st_mode)
+                size = None if is_dir else info.st_size
+            except OSError:
+                is_dir, size = False, None
+            queue.add(QueuedOp(OpKind.DELETE, side, rel_path, is_dir, size=size))
 
         def after(report) -> None:
             src_panel.marked.clear()

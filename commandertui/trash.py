@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+from urllib.parse import quote, unquote
 
 from . import bookmarks
 
@@ -77,7 +78,35 @@ def is_remote_path(path: str) -> bool:
 
 def remote_location(path: str) -> str:
     mount = _containing_mount(path)
-    return mount[1] if mount else os.path.dirname(os.path.abspath(path))
+    if mount is None:
+        return os.path.dirname(os.path.abspath(path))
+    _, target, filesystem = mount
+    if filesystem == "fuse.gvfsd-fuse":
+        # GVFS mounts every connection below one FUSE mount. Use its first
+        # relative component, never a filename elsewhere that resembles a URI.
+        absolute = os.path.abspath(path)
+        location_path = os.path.join(os.path.realpath(os.path.dirname(absolute)), os.path.basename(absolute))
+        relative = os.path.relpath(location_path, target)
+        entry = relative.split(os.sep, 1)[0]
+        backend, _, raw = entry.partition(":")
+        params = dict(pair.split("=", 1) for pair in raw.split(",") if "=" in pair)
+        host = unquote(params.get("server") or params.get("host") or "")
+        schemes = {"smb-share": "smb", "sftp": "sftp", "ftp": "ftp", "dav": "dav", "davs": "davs"}
+        scheme = schemes.get(backend)
+        if scheme and host:
+            if scheme == "dav" and params.get("ssl", "").lower() in {"true", "1"}:
+                scheme = "davs"
+            # URI authority needs brackets around IPv6 literals.
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            port = params.get("port", "")
+            if port.isdigit():
+                host += f":{port}"
+            share = unquote(params.get("share") or params.get("prefix") or "")
+            suffix = "/" + quote(share.lstrip("/"), safe="/") if share else ""
+            return f"{scheme}://{host}{suffix}"
+    label = filesystem.removeprefix("fuse.")
+    return f"{target} ({label})"
 
 
 def remove_path(path: str, local_trash=None) -> bool:

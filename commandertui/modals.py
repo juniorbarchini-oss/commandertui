@@ -97,8 +97,12 @@ class ConfirmScreen(ModalScreen[bool]):
             yield Static(self.title_text, id="confirm-title", markup=False)
             yield Static(
                 id="confirm-summary",
-                content=f"{summary['count']} operations ({by_kind or 'nothing to do'}), "
-                f"{_human_bytes(summary['total_bytes'])} total",
+                content=f"{summary['count']} operations ({by_kind or 'nothing to do'})"
+                + (
+                    f", {_human_bytes(summary['total_bytes'])} total"
+                    if summary["total_bytes"] is not None
+                    else ""
+                ),
             )
             yield Static("\n".join(f"  {name}" for name in listed), id="confirm-items", markup=False)
             with Horizontal(id="confirm-buttons"):

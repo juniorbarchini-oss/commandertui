@@ -34,6 +34,7 @@ def run_queue_with_progress(
         return
 
     remote_deletes = []
+    local_deletes = []
     remote_replaces = []
     for op in queue.ops:
         if op.kind == OpKind.DELETE:
@@ -42,6 +43,8 @@ def run_queue_with_progress(
             if is_remote_path(path):
                 remote_deletes.append(path)
                 op.permanent = True
+            else:
+                local_deletes.append(path)
         elif op.kind in (OpKind.COPY, OpKind.MOVE):
             root = right_root if op.side == OpSide.LEFT_TO_RIGHT else left_root
             path = os.path.join(root, op.rel_path)
@@ -49,13 +52,14 @@ def run_queue_with_progress(
                 remote_replaces.append(path)
     confirm_title = title
     if remote_deletes:
-        title = "Delete (remote permanently; local to trash)"
+        title = "Delete (remote permanently; local to trash)" if local_deletes else "Delete permanently"
         locations = ", ".join(sorted({remote_location(p) for p in remote_deletes}))
         names = ", ".join(os.path.basename(p) for p in remote_deletes[:3])
         confirm_title = (
             f"{len(remote_deletes)} item(s) on a network location ({locations}): {names}\n"
             "No trash will be used: these items will be deleted permanently.\n"
-            "Local items will go to the trash. Delete permanently?"
+            + ("Local items will go to the trash.\n" if local_deletes else "")
+            + "Delete permanently?"
         )
     if remote_replaces:
         confirm_title += "\nNetwork location: replaced destinations are deleted permanently; no trash."
