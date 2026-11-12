@@ -50,7 +50,6 @@ class RcloneResult:
     error: str | None = None
     cancelled: bool = False
     failed: list[tuple[str, str]] = field(default_factory=list)
-    succeeded: list[str] = field(default_factory=list)
 
     @property
     def is_config_error(self) -> bool:
@@ -360,8 +359,7 @@ def _run_rclone_process(
     current_name = default_name or "transferring..."
     errors: list[str] = []
     failed_items: dict[str, str] = {}
-    succeeded_set: set[str] = set()
-    succeeded_list: list[str] = []
+    succeeded_items: set[str] = set()
 
     def _emit_progress(total_bytes_done: int, target_files: int, file_name: str, file_size: int) -> None:
         nonlocal banked_bytes, in_flight_bytes, files_started
@@ -387,8 +385,6 @@ def _run_rclone_process(
                 bytes_transferred=last_bytes,
                 error="cancelled",
                 cancelled=True,
-                failed=list(failed_items.items()),
-                succeeded=list(succeeded_list),
             )
         try:
             line = line_queue.get(timeout=0.1)
@@ -414,13 +410,11 @@ def _run_rclone_process(
         if obj:
             current_name = os.path.basename(obj) or obj
 
-        if msg.startswith(("Copied", "Moved")):
+        if msg.startswith(("Copied ", "Moved ")):
             files_copied += 1
             if obj:
-                if obj not in succeeded_set:
-                    succeeded_set.add(obj)
-                    succeeded_set.add(os.path.normpath(obj))
-                    succeeded_list.append(obj)
+                succeeded_items.add(obj)
+                succeeded_items.add(os.path.normpath(obj))
             if progress and files_started < files_copied:
                 _emit_progress(last_bytes, files_copied, current_name, 1)
 
@@ -460,7 +454,6 @@ def _run_rclone_process(
             error="cancelled",
             cancelled=True,
             failed=list(failed_items.items()),
-            succeeded=list(succeeded_list),
         )
     if rc == 0:
         return RcloneResult(
@@ -468,12 +461,11 @@ def _run_rclone_process(
             files_transferred=files_copied,
             bytes_transferred=last_bytes,
             failed=[],
-            succeeded=list(succeeded_list),
         )
     active_failed = [
         (obj, err)
         for obj, err in failed_items.items()
-        if obj not in succeeded_set and os.path.normpath(obj) not in succeeded_set
+        if obj not in succeeded_items and os.path.normpath(obj) not in succeeded_items
     ]
     err_msg = "; ".join(errors[:3]) if errors else f"rclone exited with code {rc}"
     return RcloneResult(
@@ -482,7 +474,6 @@ def _run_rclone_process(
         bytes_transferred=last_bytes,
         error=err_msg,
         failed=active_failed,
-        succeeded=list(succeeded_list),
     )
 
 
@@ -659,18 +650,15 @@ def batch_transfer_files_with_rclone(
         res.files_transferred = len(rel_paths)
 
     if kind == OpKind.MOVE and not src_is_rc:
-        if not res.cancelled:
-            if res.ok:
-                to_trash = rel_paths
-            else:
-                succeeded_set = {os.path.normpath(name) for name in res.succeeded}
-                to_trash = [rel for rel in rel_paths if os.path.normpath(rel) in succeeded_set]
-
-            for rel in to_trash:
-                local_src = os.path.join(src_root, rel)
-                if os.path.lexists(local_src) and not send_to_trash(local_src):
-                    res.ok = False
-                    res.failed.append((rel, f"Copied but could not trash source: {local_src}"))
+        failed_rels = {os.path.normpath(name) for name, _ in res.failed}
+        for rel in rel_paths:
+            norm_rel = os.path.normpath(rel)
+            if norm_rel in failed_rels:
+                continue
+            local_src = os.path.join(src_root, rel)
+            if os.path.lexists(local_src) and not send_to_trash(local_src):
+                res.ok = False
+                res.failed.append((rel, f"Copied but could not trash source: {local_src}"))
 
     if src_is_rc or dst_is_rc:
         flush_mount_cache(affected_mountpoints([src_root, dst_root], mounts))

@@ -124,6 +124,15 @@ def execute(
                     break
                 if rc_res.ok:
                     report.succeeded += len(batch_indices)
+                elif rc_res.failed:
+                    failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
+                    for k in batch_indices:
+                        rel = queue.ops[k].rel_path
+                        norm = os.path.normpath(rel)
+                        if norm in failed_map:
+                            report.failed.append((rel, failed_map[norm]))
+                        else:
+                            report.succeeded += 1
                 elif rc_res.is_config_error:
                     # Config error fallback to normal motor for batch
                     for k in batch_indices:
@@ -142,17 +151,8 @@ def execute(
                     if report.cancelled:
                         break
                 else:
-                    succeeded_set = {os.path.normpath(name) for name in rc_res.succeeded}
-                    failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
                     for k in batch_indices:
-                        rel = queue.ops[k].rel_path
-                        norm = os.path.normpath(rel)
-                        if norm in failed_map:
-                            report.failed.append((rel, failed_map[norm]))
-                        elif norm in succeeded_set:
-                            report.succeeded += 1
-                        else:
-                            report.failed.append((rel, rc_res.error or "rclone batch failed"))
+                        report.failed.append((queue.ops[k].rel_path, rc_res.error or "rclone batch failed"))
                 if on_transfer:
                     for k in batch_indices:
                         base_files += op_stats[k][0]
