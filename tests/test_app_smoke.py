@@ -786,7 +786,10 @@ async def test_u_checks_now_and_offers_a_new_version_ignoring_the_daily_cache(tm
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(140, 30)) as pilot:
         await _skip_boot(pilot)
-        await pilot.click("#fb-6")  # the Updates button
+        update_btn = next(
+            b for b in app.screen.query("FnButton") if getattr(b, "action_name", "") == "update_app"
+        )
+        await pilot.click(update_btn)
         await pilot.pause(0.3)
         assert isinstance(app.screen, UpdateScreen)
 
