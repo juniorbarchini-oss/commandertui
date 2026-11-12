@@ -436,6 +436,8 @@ class FunctionBar(ActionBar):
         ("F6", "Move", "move"),
         ("F7", "MkDir", "make_dir"),
         ("F8", "Delete", "delete"),
+        ("z", "Tar.gz", "create_archive"),
+        ("x", "Extract", "extract_archive"),
         ("u", "Updates", "update_app"),
     ]
 

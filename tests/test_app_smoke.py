@@ -360,7 +360,9 @@ async def test_main_bars_fit_in_120_columns(tmp_path):
     async with app.run_test(size=(120, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        expected_count = 18 if sys.platform == "darwin" else 17
+        # 9 F-row boxes (incl. z Tar.gz / x Extract) + the top row; each row
+        # still fits 120 columns on its own when the two rows stack.
+        expected_count = 20 if sys.platform == "darwin" else 19
         assert len(buttons) == expected_count
         assert all(b.region.right <= 120 for b in buttons)
 
@@ -368,7 +370,7 @@ async def test_main_bars_fit_in_120_columns(tmp_path):
 @pytest.mark.asyncio
 async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
     app, left, right = await _open_confirm(tmp_path, "")
-    wide_width = 230 if sys.platform == "darwin" else 210
+    wide_width = 250 if sys.platform == "darwin" else 230  # both rows side by side need 228
     async with app.run_test(size=(wide_width, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.pause()
