@@ -12,6 +12,7 @@ from commandertui.models import OpKind
 from commandertui.plan import plan_mirror
 from commandertui.rclone_bridge import (
     RcloneMount,
+    RcloneResult,
     batch_transfer_files_with_rclone,
     copy_with_rclone,
     detect_rclone_mounts,
@@ -438,3 +439,87 @@ def test_batch_transfer_reports_partial_failures_accurately(tmp_path: Path) -> N
     assert len(report.failed) == 1
     assert report.failed[0][0] == str(src_root / "fail.txt")
     assert "permission denied" in report.failed[0][1]
+
+
+def test_rclone_transient_error_retry_success(tmp_path: Path, monkeypatch) -> None:
+    """When rclone logs a transient error but recovers and exits 0, the result is ok and failed is empty."""
+    import os
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_rclone = fake_bin / "rclone"
+    fake_rclone.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, json\n"
+        "sys.stderr.write(json.dumps({'level': 'error', 'msg': 'rateLimitExceeded 403', 'object': 'file.txt'}) + '\\n')\n"
+        "sys.stderr.write(json.dumps({'level': 'info', 'msg': 'Copied (new)', 'object': 'file.txt'}) + '\\n')\n"
+        "sys.stderr.write(json.dumps({'level': 'info', 'msg': '', 'stats': {'bytes': 100, 'transfers': 1}}) + '\\n')\n"
+        "sys.exit(0)\n"
+    )
+    fake_rclone.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "file.txt").write_text("hello", encoding="utf-8")
+    dst_dir = tmp_path / "dst"
+    dst_dir.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_dir), remote="gdrive:")]
+    with patch("commandertui.rclone_bridge.flush_mount_cache"):
+        res = copy_with_rclone(
+            str(src_dir / "file.txt"),
+            str(dst_dir / "file.txt"),
+            is_dir=False,
+            mounts=mounts,
+        )
+
+    assert res.ok is True
+    assert res.failed == []
+
+
+def test_batch_move_partial_failure_trashes_succeeded_sources(tmp_path: Path) -> None:
+    """In a partial failure move, files that were transferred successfully are sent to trash."""
+    src_root = tmp_path / "src"
+    src_root.mkdir()
+    f1 = src_root / "ok1.txt"
+    f2 = src_root / "ok2.txt"
+    f3 = src_root / "fail.txt"
+    f1.write_text("1", encoding="utf-8")
+    f2.write_text("2", encoding="utf-8")
+    f3.write_text("3", encoding="utf-8")
+
+    dst_root = tmp_path / "dst"
+    dst_root.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_root), remote="gdrive:")]
+    trashed: list[str] = []
+
+    def _fake_run_rclone(cmd, progress, cancel_check, default_name):
+        return RcloneResult(
+            ok=False,
+            files_transferred=2,
+            bytes_transferred=2,
+            error="fail.txt: permission denied",
+            failed=[("fail.txt", "permission denied")],
+        )
+
+    with (
+        patch("commandertui.rclone_bridge._run_rclone_process", side_effect=_fake_run_rclone),
+        patch("commandertui.rclone_bridge.send_to_trash", side_effect=lambda p: trashed.append(p) or True),
+        patch("commandertui.rclone_bridge.flush_mount_cache"),
+    ):
+        res = batch_transfer_files_with_rclone(
+            ["ok1.txt", "ok2.txt", "fail.txt"],
+            str(src_root),
+            str(dst_root),
+            kind=OpKind.MOVE,
+            mounts=mounts,
+        )
+
+    assert res.ok is False
+    assert len(res.failed) == 1
+    assert res.failed[0][0] == "fail.txt"
+    assert str(f1) in trashed
+    assert str(f2) in trashed
+    assert str(f3) not in trashed

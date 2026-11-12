@@ -354,11 +354,8 @@ def execute_transfer_plan(
                         for it in batch:
                             rel = os.path.relpath(it.src_abs, src_root)
                             norm = os.path.normpath(rel)
-                            base = os.path.basename(it.src_abs)
                             if norm in failed_map:
                                 report.failed.append((it.src_abs, failed_map[norm]))
-                            elif base in failed_map:
-                                report.failed.append((it.src_abs, failed_map[base]))
                             else:
                                 report.copied += 1
                     elif rc_res.is_config_error:

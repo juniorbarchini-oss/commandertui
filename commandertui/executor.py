@@ -129,11 +129,8 @@ def execute(
                     for k in batch_indices:
                         rel = queue.ops[k].rel_path
                         norm = os.path.normpath(rel)
-                        base = os.path.basename(rel)
                         if norm in failed_map:
                             report.failed.append((rel, failed_map[norm]))
-                        elif base in failed_map:
-                            report.failed.append((rel, failed_map[base]))
                         else:
                             report.succeeded += 1
                 elif rc_res.is_config_error:
