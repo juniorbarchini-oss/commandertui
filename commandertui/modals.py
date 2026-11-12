@@ -79,11 +79,12 @@ class ConfirmScreen(ModalScreen[bool]):
 
     MAX_LISTED = 6
 
-    def __init__(self, title: str, queue: OperationQueue) -> None:
+    def __init__(self, title: str, queue: OperationQueue, warning: bool = False) -> None:
         super().__init__()
         self.title_text = title
         self.queue = queue
-        self.destructive = any(op.kind == OpKind.DELETE for op in queue.ops)
+        self.destructive = warning or any(op.kind == OpKind.DELETE for op in queue.ops)
+        self.permanent = any(op.permanent for op in queue.ops)
 
     def compose(self) -> ComposeResult:
         summary = self.queue.summary()
@@ -93,7 +94,7 @@ class ConfirmScreen(ModalScreen[bool]):
         if extra > 0:
             listed.append(f"... and {extra} more")
         with Vertical(id="confirm-box", classes="danger" if self.destructive else ""):
-            yield Static(self.title_text, id="confirm-title")
+            yield Static(self.title_text, id="confirm-title", markup=False)
             yield Static(
                 id="confirm-summary",
                 content=f"{summary['count']} operations ({by_kind or 'nothing to do'}), "
@@ -101,8 +102,12 @@ class ConfirmScreen(ModalScreen[bool]):
             )
             yield Static("\n".join(f"  {name}" for name in listed), id="confirm-items", markup=False)
             with Horizontal(id="confirm-buttons"):
-                yield Button("Yes  (y)", id="yes", classes="danger" if self.destructive else "")
-                yield Button("No  (n)", id="no")
+                yield Button(
+                    "Delete permanently" if self.permanent else "Yes  (y)",
+                    id="yes",
+                    classes="danger" if self.destructive else "",
+                )
+                yield Button("Cancel" if self.permanent else "No  (n)", id="no")
 
     def on_mount(self) -> None:
         self.query_one("#no" if self.destructive else "#yes", Button).focus()
@@ -770,7 +775,14 @@ class ConflictScreen(ModalScreen):
         entries = report.conflicts
         if self.rel_path:
             entries = [c for c in entries if c.rel_path == self.rel_path]
+        from .trash import is_remote_path
+
+        remote_replace = is_remote_path(self.dst_dir) or any(
+            is_remote_path(os.path.join(self.dst_dir, conflict.rel_path)) for conflict in report.conflicts
+        )
         lines = [f"in {self.dst_dir}"]
+        if remote_replace:
+            lines.append("Network location: replaced items are deleted permanently; no trash.")
         if report.identical:
             lines.append(f"({report.identical} identical: same size and date)")
         for conflict in entries[:6]:
@@ -801,6 +813,8 @@ class ConflictScreen(ModalScreen):
         }
         if report.dir_collisions and not self.file_policy:
             labels["overwrite"] = "Overwrite (keeps extra files) (o)"
+        if remote_replace:
+            labels["overwrite"] = "Replace (permanent on network location) (o)"
         with Vertical(id="conflict-box"):
             yield Static(title, id="conflict-title", markup=False)
             with VerticalScroll(id="conflict-summary"):

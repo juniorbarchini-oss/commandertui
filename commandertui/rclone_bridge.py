@@ -26,7 +26,7 @@ from typing import Callable
 
 from .bookmarks import PROC_MOUNTS, _unescape_mount_path
 from .models import OpKind
-from .trash import send_to_trash
+from .trash import send_to_trash, remove_path
 
 ProgressCallback = Callable[[int, int, str], None]
 CancelCheck = Callable[[], bool]
@@ -537,7 +537,7 @@ def move_with_rclone(
 
     - If `src` is on a local filesystem and `dst` is on an rclone mount, copies
       to the cloud first and then sends the local `src` to the OS trash
-      (`send_to_trash`), preserving CommanderTUI's trash guarantee.
+      for local disk sources; other network sources are removed directly.
     - If `src` is on an rclone mount, uses `rclone move`/`moveto` (which moves
       source files to cloud trash on backends like Google Drive).
     """
@@ -550,7 +550,7 @@ def move_with_rclone(
         res = copy_with_rclone(src, dst, is_dir, replace_existing, progress, cancel_check, mounts)
         if not res.ok or res.cancelled:
             return res
-        if not send_to_trash(src):
+        if not remove_path(src, send_to_trash):
             return RcloneResult(
                 ok=False,
                 files_transferred=res.files_transferred,
@@ -666,7 +666,7 @@ def batch_transfer_files_with_rclone(
             continue
         if local_move:
             local_src = os.path.join(src_root, rel)
-            if not os.path.lexists(local_src) or not send_to_trash(local_src):
+            if not os.path.lexists(local_src) or not remove_path(local_src, send_to_trash):
                 res.ok = False
                 failed[norm_rel] = f"Copied but could not trash source: {local_src}"
                 continue

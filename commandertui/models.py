@@ -55,6 +55,7 @@ class QueuedOp:
     rel_path: str
     is_dir: bool
     size: int = 0
+    permanent: bool = False  # user confirmed a remote DELETE
 
 
 @dataclass

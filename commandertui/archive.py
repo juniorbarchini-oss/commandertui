@@ -32,7 +32,7 @@ from .rclone_bridge import (
     resolve_rclone_endpoint,
 )
 from .scanner import tree_stats
-from .trash import send_to_trash
+from .trash import send_to_trash, remove_path, is_remote_path
 
 ProgressCallback = Callable[[int, int, str], None]
 CancelCheck = Callable[[], bool]
@@ -368,7 +368,7 @@ def extract_archive(
                         if conflict_policy == "skip":
                             continue
                         if not os.path.isdir(target) or os.path.islink(target) or not info.is_dir():
-                            if not send_to_trash(target):
+                            if not remove_path(target, send_to_trash):
                                 raise OSError(f"Could not trash existing destination: {target}")
                     if info.is_dir():
                         os.makedirs(target, exist_ok=True)
@@ -416,7 +416,7 @@ def extract_archive(
                         if conflict_policy == "skip":
                             continue
                         if not os.path.isdir(target) or os.path.islink(target) or not member.isdir():
-                            if not send_to_trash(target):
+                            if not remove_path(target, send_to_trash):
                                 raise OSError(f"Could not trash existing destination: {target}")
                     if member.isdir():
                         os.makedirs(target, exist_ok=True)
@@ -453,7 +453,7 @@ def extract_archive(
                     elif member.issym() or member.islnk():
                         os.makedirs(os.path.dirname(target), exist_ok=True)
                         if os.path.lexists(target):
-                            if not send_to_trash(target):
+                            if not remove_path(target, send_to_trash):
                                 os.remove(target)
                         if member.issym():
                             os.symlink(member.linkname, target)
@@ -528,9 +528,22 @@ def run_create_archive(owner, src_panel, dst_panel, sources: list[str]) -> None:
         if os.path.lexists(out_path):
             owner.app.push_screen(
                 ChoiceScreen(
-                    f"{os.path.basename(out_path)} already exists in destination:", ["Overwrite", "Cancel"]
+                    f"{os.path.basename(out_path)} already exists in destination:",
+                    [
+                        (
+                            "Overwrite (permanent on network location)"
+                            if is_remote_path(out_path)
+                            else "Overwrite"
+                        ),
+                        "Cancel",
+                    ],
+                    initial=1 if is_remote_path(out_path) else 0,
                 ),
-                lambda choice: _start_pack(out_path, trash_existing=True) if choice == "Overwrite" else None,
+                lambda choice: (
+                    _start_pack(out_path, trash_existing=True)
+                    if choice and choice.startswith("Overwrite")
+                    else None
+                ),
             )
         else:
             _start_pack(out_path, trash_existing=False)
@@ -540,42 +553,47 @@ def run_create_archive(owner, src_panel, dst_panel, sources: list[str]) -> None:
         owner.app.push_screen(progress)
 
         def work() -> None:
-            if trash_existing and os.path.lexists(out_path):
-                mounts = detect_rclone_mounts() if rclone_available() else []
-                _, is_rc = resolve_rclone_endpoint(out_path, mounts) if mounts else (out_path, False)
-                if not is_rc and not send_to_trash(out_path):
-                    owner.app.call_from_thread(
-                        finish,
-                        ArchiveResult(
-                            ok=False, archive_path=out_path, error="Could not move existing archive to trash"
-                        ),
-                    )
-                    return
+            try:
+                if trash_existing and os.path.lexists(out_path):
+                    mounts = detect_rclone_mounts() if rclone_available() else []
+                    _, is_rc = resolve_rclone_endpoint(out_path, mounts) if mounts else (out_path, False)
+                    if not is_rc and not remove_path(out_path, send_to_trash):
+                        owner.app.call_from_thread(
+                            finish,
+                            ArchiveResult(
+                                ok=False,
+                                archive_path=out_path,
+                                error="Could not move existing archive to trash",
+                            ),
+                        )
+                        return
 
-            files, _, total_bytes = tree_stats(sources, lambda: progress.cancel_requested)
-            status = TransferStatus(
-                ops_total=len(sources),
-                files_total=max(files, 1),
-                bytes_total=total_bytes,
-            )
-            last = 0.0
-            current_done = 0
+                files, _, total_bytes = tree_stats(sources, lambda: progress.cancel_requested)
+                status = TransferStatus(
+                    ops_total=len(sources),
+                    files_total=max(files, 1),
+                    bytes_total=total_bytes,
+                )
+                last = 0.0
+                current_done = 0
 
-            def update(done: int, total: int, name: str) -> None:
-                nonlocal last, current_done
-                if done == 0:
-                    current_done = 0
-                    status.files_done += 1
-                status.bytes_done += max(0, done - current_done)
-                current_done = done
-                status.file_name, status.file_done, status.file_total = name, done, total
-                now = time.monotonic()
-                if now - last >= 0.1 or done == total:
-                    last = now
-                    owner.app.call_from_thread(progress.report, replace(status))
+                def update(done: int, total: int, name: str) -> None:
+                    nonlocal last, current_done
+                    if done == 0:
+                        current_done = 0
+                        status.files_done += 1
+                    status.bytes_done += max(0, done - current_done)
+                    current_done = done
+                    status.file_name, status.file_done, status.file_total = name, done, total
+                    now = time.monotonic()
+                    if now - last >= 0.1 or done == total:
+                        last = now
+                        owner.app.call_from_thread(progress.report, replace(status))
 
-            res = create_tar_gz(sources, out_path, update, lambda: progress.cancel_requested)
-            owner.app.call_from_thread(finish, res)
+                res = create_tar_gz(sources, out_path, update, lambda: progress.cancel_requested)
+                owner.app.call_from_thread(finish, res)
+            except Exception as error:
+                owner.app.call_from_thread(finish, ArchiveResult(ok=False, error=str(error)))
 
         def finish(res: ArchiveResult) -> None:
             progress.dismiss()
@@ -640,8 +658,16 @@ def run_extract_archive(owner, src_panel, dst_panel, archive_path: str) -> None:
             owner.app.push_screen(
                 ChoiceScreen(
                     prompt,
-                    ["Replace (old ones to trash)", "Skip existing", "Cancel"],
-                    initial=0,
+                    [
+                        (
+                            "Replace (permanent on network location)"
+                            if any(is_remote_path(p) for p in existing)
+                            else "Replace (old ones to trash)"
+                        ),
+                        "Skip existing",
+                        "Cancel",
+                    ],
+                    initial=2 if any(is_remote_path(p) for p in existing) else 0,
                 ),
                 on_conflict,
             )
@@ -653,38 +679,41 @@ def run_extract_archive(owner, src_panel, dst_panel, archive_path: str) -> None:
         owner.app.push_screen(progress)
 
         def work() -> None:
-            files_total, bytes_total = archive_uncompressed_stats(
-                archive_path, lambda: progress.cancel_requested
-            )
-            status = TransferStatus(
-                ops_total=1,
-                files_total=max(files_total, 1),
-                bytes_total=bytes_total,
-            )
-            last = 0.0
-            current_done = 0
+            try:
+                files_total, bytes_total = archive_uncompressed_stats(
+                    archive_path, lambda: progress.cancel_requested
+                )
+                status = TransferStatus(
+                    ops_total=1,
+                    files_total=max(files_total, 1),
+                    bytes_total=bytes_total,
+                )
+                last = 0.0
+                current_done = 0
 
-            def update(done: int, total: int, name: str) -> None:
-                nonlocal last, current_done
-                if done == 0:
-                    current_done = 0
-                    status.files_done += 1
-                status.bytes_done += max(0, done - current_done)
-                current_done = done
-                status.file_name, status.file_done, status.file_total = name, done, total
-                now = time.monotonic()
-                if now - last >= 0.1 or done == total:
-                    last = now
-                    owner.app.call_from_thread(progress.report, replace(status))
+                def update(done: int, total: int, name: str) -> None:
+                    nonlocal last, current_done
+                    if done == 0:
+                        current_done = 0
+                        status.files_done += 1
+                    status.bytes_done += max(0, done - current_done)
+                    current_done = done
+                    status.file_name, status.file_done, status.file_total = name, done, total
+                    now = time.monotonic()
+                    if now - last >= 0.1 or done == total:
+                        last = now
+                        owner.app.call_from_thread(progress.report, replace(status))
 
-            res = extract_archive(
-                archive_path,
-                target_dir,
-                update,
-                lambda: progress.cancel_requested,
-                conflict_policy=conflict_policy,
-            )
-            owner.app.call_from_thread(finish, res)
+                res = extract_archive(
+                    archive_path,
+                    target_dir,
+                    update,
+                    lambda: progress.cancel_requested,
+                    conflict_policy=conflict_policy,
+                )
+                owner.app.call_from_thread(finish, res)
+            except Exception as error:
+                owner.app.call_from_thread(finish, ArchiveResult(ok=False, error=str(error)))
 
         def finish(res: ArchiveResult) -> None:
             progress.dismiss()

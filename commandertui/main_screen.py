@@ -25,7 +25,6 @@ from .modals import (
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .run_transfer import run_transfer
-from .scanner import path_size
 from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
 
 LOGIN_ANON = "Anonymous (no login)"
@@ -480,7 +479,7 @@ class MainScreen(Screen):
         queue = OperationQueue()
         for item in items:
             rel_path = os.path.relpath(item, src_panel.path)
-            queue.add(QueuedOp(OpKind.DELETE, side, rel_path, os.path.isdir(item), size=path_size(item)))
+            queue.add(QueuedOp(OpKind.DELETE, side, rel_path, os.path.isdir(item)))
 
         def after(report) -> None:
             src_panel.marked.clear()

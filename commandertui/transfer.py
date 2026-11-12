@@ -232,7 +232,7 @@ def execute_transfer_plan(
             if dst_exists and not replace_existing:
                 raise FileExistsError(dst)
             if dst_exists and (src_dir != dst_dir or os.path.islink(src) or os.path.islink(dst)):
-                if not sync.send_to_trash(dst):
+                if not sync.remove_path(dst, sync.send_to_trash):
                     raise OSError("Could not trash existing destination")
             has_symlinks = src_dir and rclone_bridge.tree_has_symlinks(src)
             if (
@@ -283,7 +283,7 @@ def execute_transfer_plan(
                 )
                 if not verified:
                     raise OSError("Copy verification failed; source retained")
-                if not sync.send_to_trash(src):
+                if not sync.remove_path(src, sync.send_to_trash):
                     raise OSError("Copied but could not trash source")
             report.copied += 1
         except Exception as error:

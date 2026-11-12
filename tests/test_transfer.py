@@ -321,7 +321,7 @@ def test_destination_inside_source_rejected(roots):
 
 @pytest.fixture
 def real_roots(tmp_path, monkeypatch, isolated_user_home):
-    # Exercise real trash.py (including lexists and shutil.move) in the fake
+    # Exercise real trash.py (including lexists and same-filesystem rename) in the fake
     # HOME. Disable native backends: send2trash caches HOME when imported and
     # gio may delegate to a desktop service outside the test environment.
     import subprocess

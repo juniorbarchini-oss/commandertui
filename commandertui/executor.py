@@ -206,7 +206,7 @@ def execute(
                     result = move_item(src_path, dst_path, byte_progress, cancel_check)
             else:  # DELETE
                 root = left_root if op.side == OpSide.LEFT else right_root
-                result = delete_item(os.path.join(root, op.rel_path))
+                result = delete_item(os.path.join(root, op.rel_path), permanent=op.permanent)
 
             if result.cancelled:
                 report.cancelled = True

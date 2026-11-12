@@ -16,9 +16,9 @@ running an unauthenticated local HTTP server. This project deliberately:
 
 - **Never opens a network port.** Pure terminal UI (Textual), no HTTP server (the only outgoing request is the update check on startup, which you can turn off),
   no webview.
-- **Never does a raw `rm -rf`.** Deletes always go through the desktop trash
-  (`send2trash` → `gio trash` → manual move into `~/.local/share/Trash`, in
-  that order).
+- **Local deletes use the desktop trash.** Network/remote deletes require an
+  explicit permanent-delete confirmation, defaulting to Cancel. Remote data
+  never enters a trash backend or gets copied into the local trash.
 - **Never overwrites in place.** Copies stream into a hidden `.tmp` file next
   to the destination and are committed with `os.replace` — a crash or
   Ctrl+C never leaves a half-written file.
@@ -113,7 +113,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `F5` | Copy marked (or item under cursor) to the other pane |
 | `F6` | Move marked to the other pane |
 | `F7` | Create a folder in the active pane |
-| `F8` / `Delete` | Delete marked (to trash) |
+| `F8` / `Delete` | Delete marked: local items to trash; network/remote items permanently after an explicit warning (Cancel by default) |
 | `z` | Create `.tar.gz` archive of marked items into the other pane |
 | `x` | Extract archive under cursor (`.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.tar`, `.zip`) into the other pane |
 | `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
@@ -290,3 +290,23 @@ CommanderTUI supports creating and extracting archives directly between panes:
 - **`x` (Extract archive):** Extracts the archive under the cursor (`.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.tar`, or `.zip`) into the opposite pane.
 - **Safe extraction:** Before extracting, CommanderTUI inspects the archive contents for existing files at the destination. If conflicts exist, a choice dialog asks whether to **Replace (old ones to trash)**, **Skip existing**, or **Cancel**.
 - **Security:** Built-in protection against directory traversal attacks (ZipSlip / Tar traversal) preventing files from extracting outside the destination folder, complemented by Python's `data_filter` on Python ≥ 3.12.
+
+### Local trash and network deletion
+
+An item is local only when its most specific mount is a known local disk
+filesystem (including `fuseblk`, `tmpfs` and the root overlay), or a Linux
+block-device mount. Unknown filesystems are treated as remote. This includes
+SMB/CIFS, GVFS, rclone/Google Drive, SFTP/sshfs, NFS and WebDAV. A server's
+own ext4 disk remains local; viewing its SMB share from another machine is remote.
+
+F8 and Compare & Sync warn before permanently deleting remote items and default
+to Cancel. Mixed batches keep local items on the trash path. Replacing remote
+destinations, archive extraction with Replace and archive overwrite also warn
+that replacement is permanent. MOVE removes a remote source directly after
+its copy is verified (rclone handles its own remote moves). Directory symlinks
+are unlinked without deleting their targets.
+
+The local trash fallback uses a same-filesystem rename only. An `EXDEV` error
+fails safely instead of downloading or copying data across filesystems.
+Cancelling stops subsequent operations; completed permanent deletions cannot
+be undone. A completed or failed worker always closes its progress screen.

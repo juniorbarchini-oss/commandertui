@@ -232,6 +232,7 @@ def test_trash_fallback_uses_macos_trash_on_darwin(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
+    monkeypatch.setattr(trash, "is_remote_path", lambda path: False)  # this test exercises local trash
     monkeypatch.setattr(trash.sys, "platform", "darwin")
     monkeypatch.setitem(sys.modules, "send2trash", None)  # force layer 1 failure
     monkeypatch.setattr(trash.subprocess, "run", lambda *a, **k: _cp(1))  # force layer 2 failure
