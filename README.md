@@ -114,6 +114,8 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `F6` | Move marked to the other pane |
 | `F7` | Create a folder in the active pane |
 | `F8` / `Delete` | Delete marked (to trash) |
+| `z` | Create `.tar.gz` archive of marked items into the other pane |
+| `x` | Extract archive under cursor (`.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.tar`, `.zip`) into the other pane |
 | `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
 | `+` / `-` / `*` | Mark / unmark by pattern (`*.iso`, or plain text = contains) / invert marks, over the rows shown |
 | `u` | Check for updates now (also the **Updates** button): asks PyPI right away and offers the new version if there is one |
@@ -199,6 +201,8 @@ commandertui/
 ├── plan.py              # diff -> OperationQueue (mirror / update / two-way)
 ├── sync.py               # atomic copy/move (streamed, tmp+replace), checksum verify
 ├── trash.py               # 3-layer safe delete (send2trash / gio trash / manual)
+├── rclone_bridge.py        # Turbo Copy: parallel rclone engine for FUSE mounts
+├── archive.py              # create .tar.gz and safe extract (.tar.*, .zip)
 ├── executor.py             # runs an OperationQueue against the filesystem
 ├── bookmarks.py             # detected mounts (USB/SMB/rclone) + saved places
 ├── netlocations.py           # SMB/SFTP/FTP locations via gio (list shares, mount, save)
@@ -258,3 +262,23 @@ and failed files stay in the source. Existing files always require a decision,
 even when size and date match: Overwrite copies/moves them, while Skip (or
 Only newer for identical files) retains them. The completion message reports
 copied, skipped, failed, and identical files retained by a move.
+
+## Turbo Copy (rclone mounts)
+
+When transferring files to or from cloud storage mounted via `rclone mount` (`fuse.rclone`, such as Google Drive or OneDrive), traditional sequential POSIX file I/O over FUSE incurs one HTTP round-trip per file, making transfers of thousands of small files very slow.
+
+CommanderTUI includes an automatic **Turbo Copy** engine:
+- **Automatic detection:** Detects active `fuse.rclone` mounts from `/proc/mounts` (Linux) or `mount` (macOS) and resolves local mount paths back to their native `rclone` remote spec (e.g. `/mnt/gdrive/docs` -> `gdrive:docs`).
+- **Parallel multi-threading:** Offloads file batches and recursive folder transfers to a single parallel `rclone` worker (`--transfers 16 --checkers 16`) with live JSON progress streaming directly to the UI progress bar.
+- **Graceful cancellation:** Pressing `Esc` terminates the transfer process group cleanly (`start_new_session=True` + `killpg`), leaving no orphaned background workers.
+- **Safety fallback:** If `rclone` is not installed or returns a configuration error (e.g. remote section not found in `rclone.conf`), CommanderTUI automatically falls back to its standard atomic copy/move engine. Local folders containing symlinks also route through the standard engine to preserve symlinks properly.
+- **Trash safety:** Moving files from local storage to an rclone mount copies to the remote first and only sends the local source to the desktop trash after successful transfer confirmation.
+- **Selective cache invalidation:** On completion, cache flush signals (`SIGHUP`) are sent strictly to the specific user `rclone mount` process managing the affected mountpoint, never interfering with other active rclone tasks (such as backups or syncs).
+
+## Archives (tar / zip)
+
+CommanderTUI supports creating and extracting archives directly between panes:
+- **`z` (Create .tar.gz):** Compresses marked items (or the item under the cursor) into a `.tar.gz` archive created in the opposite pane. If the destination is on an rclone mount, the archive is assembled in a local temporary file first and then transferred cleanly to the cloud.
+- **`x` (Extract archive):** Extracts the archive under the cursor (`.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.tar`, or `.zip`) into the opposite pane.
+- **Safe extraction:** Before extracting, CommanderTUI inspects the archive contents for existing files at the destination. If conflicts exist, a choice dialog asks whether to **Replace (old ones to trash)**, **Skip existing**, or **Cancel**.
+- **Security:** Built-in protection against directory traversal attacks (ZipSlip / Tar traversal) preventing files from extracting outside the destination folder, complemented by Python's `data_filter` on Python ≥ 3.12.
