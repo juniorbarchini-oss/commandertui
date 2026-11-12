@@ -124,8 +124,38 @@ def execute(
                     break
                 if rc_res.ok:
                     report.succeeded += len(batch_indices)
+                elif rc_res.failed:
+                    failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
+                    for k in batch_indices:
+                        rel = queue.ops[k].rel_path
+                        norm = os.path.normpath(rel)
+                        base = os.path.basename(rel)
+                        if norm in failed_map:
+                            report.failed.append((rel, failed_map[norm]))
+                        elif base in failed_map:
+                            report.failed.append((rel, failed_map[base]))
+                        else:
+                            report.succeeded += 1
+                elif rc_res.is_config_error:
+                    # Config error fallback to normal motor for batch
+                    for k in batch_indices:
+                        b_op = queue.ops[k]
+                        b_fn = copy_item if b_op.kind == OpKind.COPY else move_item
+                        b_src = os.path.join(src_root, b_op.rel_path)
+                        b_dst = os.path.join(dst_root, b_op.rel_path)
+                        b_res = b_fn(b_src, b_dst, byte_progress, cancel_check)
+                        if b_res.cancelled:
+                            report.cancelled = True
+                            break
+                        if b_res.ok:
+                            report.succeeded += 1
+                        else:
+                            report.failed.append((b_op.rel_path, b_res.error or "transfer failed"))
+                    if report.cancelled:
+                        break
                 else:
-                    report.failed.append((op.rel_path, rc_res.error or "rclone batch failed"))
+                    for k in batch_indices:
+                        report.failed.append((queue.ops[k].rel_path, rc_res.error or "rclone batch failed"))
                 if on_transfer:
                     for k in batch_indices:
                         base_files += op_stats[k][0]
@@ -141,9 +171,12 @@ def execute(
                 src_root, dst_root = _roots_for(op.side, left_root, right_root)
                 src_path = os.path.join(src_root, op.rel_path)
                 dst_path = os.path.join(dst_root, op.rel_path)
+                is_dir = os.path.isdir(src_path)
+                has_symlinks = is_dir and rclone_bridge.tree_has_symlinks(src_path)
                 if (
                     mounts
                     and not os.path.islink(src_path)
+                    and not has_symlinks
                     and rclone_bridge.is_rclone_transfer(src_path, dst_path, mounts)
                 ):
                     fn = (
@@ -154,13 +187,17 @@ def execute(
                     rc_res = fn(
                         src_path,
                         dst_path,
-                        os.path.isdir(src_path),
+                        is_dir,
                         True,
                         byte_progress,
                         cancel_check,
                         mounts,
                     )
-                    result = TransferResult(ok=rc_res.ok, error=rc_res.error, cancelled=rc_res.cancelled)
+                    if not rc_res.ok and rc_res.is_config_error:
+                        fn_normal = copy_item if op.kind == OpKind.COPY else move_item
+                        result = fn_normal(src_path, dst_path, byte_progress, cancel_check)
+                    else:
+                        result = TransferResult(ok=rc_res.ok, error=rc_res.error, cancelled=rc_res.cancelled)
                 elif op.kind == OpKind.COPY:
                     result = copy_item(src_path, dst_path, byte_progress, cancel_check)
                 else:

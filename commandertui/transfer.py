@@ -216,7 +216,7 @@ def execute_transfer_plan(
             return True
         return False
 
-    def transfer(src, dst, replace_existing):
+    def transfer(src, dst, replace_existing, allow_rclone: bool = True):
         if cancelled():
             return
         try:
@@ -234,16 +234,25 @@ def execute_transfer_plan(
             if dst_exists and (src_dir != dst_dir or os.path.islink(src) or os.path.islink(dst)):
                 if not sync.send_to_trash(dst):
                     raise OSError("Could not trash existing destination")
-            if mounts and not os.path.islink(src) and rclone_bridge.is_rclone_transfer(src, dst, mounts):
+            has_symlinks = src_dir and rclone_bridge.tree_has_symlinks(src)
+            if (
+                allow_rclone
+                and mounts
+                and not os.path.islink(src)
+                and not has_symlinks
+                and rclone_bridge.is_rclone_transfer(src, dst, mounts)
+            ):
                 fn = rclone_bridge.copy_with_rclone if kind == OpKind.COPY else rclone_bridge.move_with_rclone
                 rc_res = fn(src, dst, src_dir, replace_existing, progress, cancel_check, mounts)
                 if rc_res.cancelled:
                     report.cancelled = True
                     return
-                if not rc_res.ok:
+                if rc_res.ok:
+                    report.copied += rc_res.files_transferred
+                    return
+                if not rc_res.is_config_error:
                     raise OSError(rc_res.error or "rclone transfer failed")
-                report.copied += rc_res.files_transferred
-                return
+                # When rc_res.is_config_error is True, fall through to normal motor below!
             if src_dir:
                 os.makedirs(dst, exist_ok=True)
                 if kind == OpKind.MOVE:
@@ -251,7 +260,12 @@ def execute_transfer_plan(
                 with os.scandir(src) as entries:
                     children = sorted(entries, key=lambda e: e.name)
                 for entry in children:
-                    transfer(entry.path, os.path.join(dst, entry.name), replace_existing)
+                    transfer(
+                        entry.path,
+                        os.path.join(dst, entry.name),
+                        replace_existing,
+                        allow_rclone=allow_rclone and not has_symlinks,
+                    )
                     if report.cancelled:
                         break
                 return
@@ -333,10 +347,34 @@ def execute_transfer_plan(
                     if rc_res.cancelled:
                         report.cancelled = True
                         break
-                    if not rc_res.ok:
-                        report.failed.append((batch[0].src_abs, rc_res.error or "rclone batch failed"))
-                    else:
+                    if rc_res.ok:
                         report.copied += len(batch)
+                    elif rc_res.failed:
+                        failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
+                        for it in batch:
+                            rel = os.path.relpath(it.src_abs, src_root)
+                            norm = os.path.normpath(rel)
+                            base = os.path.basename(it.src_abs)
+                            if norm in failed_map:
+                                report.failed.append((it.src_abs, failed_map[norm]))
+                            elif base in failed_map:
+                                report.failed.append((it.src_abs, failed_map[base]))
+                            else:
+                                report.copied += 1
+                    elif rc_res.is_config_error:
+                        for it in batch:
+                            transfer(it.src_abs, it.dst_abs, it.replace_existing)
+                            if on_item:
+                                on_item(it, report)
+                            if report.cancelled:
+                                break
+                        if report.cancelled:
+                            break
+                        idx = j
+                        continue
+                    else:
+                        for it in batch:
+                            report.failed.append((it.src_abs, rc_res.error or "rclone batch failed"))
                     for it in batch:
                         if on_item:
                             on_item(it, report)

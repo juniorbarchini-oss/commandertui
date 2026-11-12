@@ -290,3 +290,151 @@ def test_rclone_progress_compatible_with_transfer_status(tmp_path: Path) -> None
     assert res.ok is True
     assert status.files_done == 2
     assert status.bytes_done == 3000
+
+
+def test_find_rclone_mount_pids_and_flush_cache(tmp_path: Path) -> None:
+    """find_rclone_mount_pids only matches rclone mount processes for the specified mountpoint."""
+    import signal
+    from commandertui.rclone_bridge import find_rclone_mount_pids, flush_mount_cache
+
+    proc_dir = tmp_path / "proc"
+    (proc_dir / "101").mkdir(parents=True)
+    (proc_dir / "101" / "cmdline").write_bytes(b"/usr/bin/rclone\x00mount\x00gdrive:\x00/mnt/gdrive\x00")
+
+    (proc_dir / "102").mkdir()
+    (proc_dir / "102" / "cmdline").write_bytes(b"/usr/bin/rclone\x00copy\x00/tmp/a\x00/mnt/gdrive\x00")
+
+    (proc_dir / "103").mkdir()
+    (proc_dir / "103" / "cmdline").write_bytes(b"/usr/bin/rclone\x00serve\x00http\x00/mnt/gdrive\x00")
+
+    (proc_dir / "104").mkdir()
+    (proc_dir / "104" / "cmdline").write_bytes(b"/usr/bin/rclone\x00mount\x00backup:\x00/mnt/backup\x00")
+
+    (proc_dir / "105").mkdir()
+    (proc_dir / "105" / "cmdline").write_bytes(b"python3\x00server.py\x00")
+
+    matched_gdrive = find_rclone_mount_pids(["/mnt/gdrive"], proc_dir=str(proc_dir))
+    assert matched_gdrive == [101]
+
+    matched_all = find_rclone_mount_pids(proc_dir=str(proc_dir))
+    assert matched_all == [101, 104]
+
+    with patch("os.kill") as mock_kill:
+        signalled = flush_mount_cache(["/mnt/gdrive"], proc_dir=str(proc_dir))
+        assert signalled == [101]
+        mock_kill.assert_called_once_with(101, signal.SIGHUP)
+
+
+def test_rclone_config_error_fallback(tmp_path: Path, monkeypatch) -> None:
+    """When rclone fails with a config/remote-not-found error, execution falls back to normal motor."""
+    import os
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_rclone = fake_bin / "rclone"
+    fake_rclone.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, json\n"
+        "sys.stderr.write(json.dumps({'level': 'error', 'msg': 'Failed to create file system for \"bad:\": didn\\'t find section in config file'}) + '\\n')\n"
+        "sys.exit(1)\n"
+    )
+    fake_rclone.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "doc.txt").write_text("fallback content", encoding="utf-8")
+    dst_dir = tmp_path / "dst"
+    dst_dir.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_dir), remote="bad:")]
+    sources = [str(src_dir / "doc.txt")]
+    plan = build_transfer_plan(
+        sources,
+        str(dst_dir),
+        OpKind.COPY,
+        detect_conflicts(sources, str(dst_dir)),
+        ConflictPolicy(Resolution.OVERWRITE, {}),
+    )
+
+    with patch("commandertui.rclone_bridge.detect_rclone_mounts", return_value=mounts):
+        report = execute_transfer_plan(plan, OpKind.COPY)
+
+    assert report.failed == []
+    assert report.copied == 1
+    assert (dst_dir / "doc.txt").read_text(encoding="utf-8") == "fallback content"
+
+
+def test_symlinks_in_local_dir_bypasses_rclone(tmp_path: Path) -> None:
+    """Copying a local folder containing symlinks bypasses rclone and uses normal motor."""
+    src_dir = tmp_path / "src_tree"
+    src_dir.mkdir()
+    (src_dir / "real.txt").write_text("real content", encoding="utf-8")
+    (src_dir / "link.txt").symlink_to("real.txt")
+
+    dst_dir = tmp_path / "dst_mount"
+    dst_dir.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_dir), remote="gdrive:")]
+    sources = [str(src_dir)]
+    plan = build_transfer_plan(
+        sources,
+        str(dst_dir),
+        OpKind.COPY,
+        detect_conflicts(sources, str(dst_dir)),
+        ConflictPolicy(Resolution.OVERWRITE, {}),
+    )
+
+    with (
+        patch("commandertui.rclone_bridge.detect_rclone_mounts", return_value=mounts),
+        patch("commandertui.rclone_bridge.copy_with_rclone") as mock_rclone_copy,
+    ):
+        report = execute_transfer_plan(plan, OpKind.COPY)
+
+    assert report.failed == []
+    mock_rclone_copy.assert_not_called()
+    assert (dst_dir / "src_tree" / "real.txt").read_text(encoding="utf-8") == "real content"
+    assert (dst_dir / "src_tree" / "link.txt").is_symlink()
+
+
+def test_batch_transfer_reports_partial_failures_accurately(tmp_path: Path) -> None:
+    """When a batch has failing items, failed items are recorded and successful items are counted."""
+    from commandertui.rclone_bridge import RcloneResult
+
+    src_root = tmp_path / "src"
+    src_root.mkdir()
+    (src_root / "ok1.txt").write_text("1", encoding="utf-8")
+    (src_root / "fail.txt").write_text("2", encoding="utf-8")
+    (src_root / "ok2.txt").write_text("3", encoding="utf-8")
+
+    dst_root = tmp_path / "dst"
+    dst_root.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_root), remote="gdrive:")]
+    sources = [str(src_root / "ok1.txt"), str(src_root / "fail.txt"), str(src_root / "ok2.txt")]
+    plan = build_transfer_plan(
+        sources,
+        str(dst_root),
+        OpKind.COPY,
+        detect_conflicts(sources, str(dst_root)),
+        ConflictPolicy(Resolution.OVERWRITE, {}),
+    )
+
+    fake_result = RcloneResult(
+        ok=False,
+        files_transferred=2,
+        bytes_transferred=2,
+        error="fail.txt: permission denied",
+        failed=[("fail.txt", "permission denied")],
+    )
+
+    with (
+        patch("commandertui.rclone_bridge.detect_rclone_mounts", return_value=mounts),
+        patch("commandertui.rclone_bridge.batch_transfer_files_with_rclone", return_value=fake_result),
+    ):
+        report = execute_transfer_plan(plan, OpKind.COPY)
+
+    assert report.copied == 2
+    assert len(report.failed) == 1
+    assert report.failed[0][0] == str(src_root / "fail.txt")
+    assert "permission denied" in report.failed[0][1]

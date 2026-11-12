@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from .bookmarks import PROC_MOUNTS, _unescape_mount_path
@@ -49,6 +49,11 @@ class RcloneResult:
     bytes_transferred: int = 0
     error: str | None = None
     cancelled: bool = False
+    failed: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def is_config_error(self) -> bool:
+        return is_rclone_config_error(self.error)
 
 
 def rclone_available() -> bool:
@@ -127,18 +132,173 @@ def is_rclone_transfer(src: str, dst: str, mounts: list[RcloneMount] | None = No
     return src_rc or dst_rc
 
 
-def flush_mount_cache() -> None:
-    """Send SIGHUP to active rclone mount daemons so directory caches refresh."""
+def is_rclone_config_error(error_msg: str | None) -> bool:
+    """Return True if the error indicates a missing rclone remote/config rather than
+    a real transfer failure."""
+    if not error_msg:
+        return False
+    lower = error_msg.lower()
+    patterns = (
+        "didn't find section in config file",
+        "did not find section in config file",
+        "couldn't find remote",
+        "could not find remote",
+        "failed to create file system for",
+        "config file",
+    )
+    return any(p in lower for p in patterns)
+
+
+def tree_has_symlinks(path: str) -> bool:
+    """Return True if `path` is a symlink or contains any symlink within."""
     try:
-        subprocess.run(
-            ["pkill", "-HUP", "-x", "rclone"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-            check=False,
-        )
-    except Exception:
+        if os.path.islink(path):
+            return True
+        if not os.path.isdir(path):
+            return False
+        for root, dirs, files in os.walk(path, followlinks=False):
+            for d in dirs:
+                if os.path.islink(os.path.join(root, d)):
+                    return True
+            for f in files:
+                if os.path.islink(os.path.join(root, f)):
+                    return True
+    except OSError:
         pass
+    return False
+
+
+def affected_mountpoints(paths_or_specs: list[str], mounts: list[RcloneMount]) -> list[str]:
+    """Return mountpoints from `mounts` that contain any of `paths_or_specs`."""
+    affected: set[str] = set()
+    for item in paths_or_specs:
+        norm = os.path.normpath(os.path.abspath(item))
+        for m in mounts:
+            if norm == m.mountpoint or norm.startswith(m.mountpoint + os.sep):
+                affected.add(m.mountpoint)
+            elif m.remote and (item == m.remote or item.startswith(m.remote)):
+                affected.add(m.mountpoint)
+    return sorted(affected)
+
+
+def find_rclone_mount_pids(
+    mountpoints: list[str] | None = None,
+    proc_dir: str = "/proc",
+) -> list[int]:
+    """Find PIDs of active `rclone mount` processes owned by the current user
+    matching any of the specified `mountpoints`.
+
+    If `mountpoints` is None or empty, returns all `rclone mount` processes of the user.
+    """
+    matched_pids: list[int] = []
+    norm_targets = [os.path.normpath(os.path.abspath(m)) for m in mountpoints] if mountpoints else []
+
+    if os.path.isdir(proc_dir):
+        uid = os.getuid() if hasattr(os, "getuid") else None
+        try:
+            entries = os.listdir(proc_dir)
+        except OSError:
+            entries = []
+
+        for entry in entries:
+            if not entry.isdigit():
+                continue
+            pid_dir = os.path.join(proc_dir, entry)
+            # In Linux real /proc, verify ownership to avoid trying to signal other users
+            if proc_dir == "/proc" and uid is not None:
+                try:
+                    if os.stat(pid_dir).st_uid != uid:
+                        continue
+                except OSError:
+                    continue
+
+            cmdline_path = os.path.join(pid_dir, "cmdline")
+            try:
+                with open(cmdline_path, "rb") as f:
+                    raw = f.read()
+            except OSError:
+                continue
+
+            if not raw:
+                continue
+
+            if b"\x00" in raw:
+                parts = [p.decode("utf-8", "replace") for p in raw.split(b"\x00") if p]
+            else:
+                parts = [p.decode("utf-8", "replace") for p in raw.split() if p]
+
+            if not parts:
+                continue
+
+            prog = os.path.basename(parts[0])
+            if prog != "rclone":
+                continue
+
+            args = parts[1:]
+            if "mount" not in args:
+                continue
+
+            if norm_targets:
+                has_target = False
+                for arg in args:
+                    norm_arg = (
+                        os.path.normpath(os.path.abspath(arg))
+                        if os.path.isabs(arg)
+                        else os.path.normpath(arg)
+                    )
+                    if norm_arg in norm_targets or os.path.normpath(arg) in norm_targets:
+                        has_target = True
+                        break
+                if not has_target:
+                    continue
+
+            matched_pids.append(int(entry))
+    elif sys.platform == "darwin":
+        try:
+            uid = os.getuid() if hasattr(os, "getuid") else None
+            cmd = ["pgrep", "-f", "rclone mount"]
+            if uid is not None:
+                cmd = ["pgrep", "-u", str(uid), "-f", "rclone mount"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=3, check=False)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    pid_str = line.strip()
+                    if not pid_str.isdigit():
+                        continue
+                    pid = int(pid_str)
+                    if norm_targets:
+                        ps_res = subprocess.run(
+                            ["ps", "-p", str(pid), "-o", "command="],
+                            capture_output=True,
+                            text=True,
+                            timeout=3,
+                            check=False,
+                        )
+                        if ps_res.returncode == 0:
+                            ps_cmd = ps_res.stdout.strip()
+                            if not any(target in ps_cmd for target in norm_targets):
+                                continue
+                    matched_pids.append(pid)
+        except Exception:
+            pass
+
+    return sorted(matched_pids)
+
+
+def flush_mount_cache(
+    mountpoints: list[str] | None = None,
+    proc_dir: str = "/proc",
+) -> list[int]:
+    """Send SIGHUP only to active `rclone mount` processes matching `mountpoints`."""
+    signalled: list[int] = []
+    pids = find_rclone_mount_pids(mountpoints, proc_dir=proc_dir)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGHUP)
+            signalled.append(pid)
+        except (ProcessLookupError, PermissionError):
+            pass
+    return signalled
 
 
 def _terminate_process_group(proc: subprocess.Popen) -> None:
@@ -198,6 +358,7 @@ def _run_rclone_process(
     last_bytes = 0
     current_name = default_name or "transferring..."
     errors: list[str] = []
+    failed_items: list[tuple[str, str]] = []
 
     def _emit_progress(total_bytes_done: int, target_files: int, file_name: str, file_size: int) -> None:
         nonlocal banked_bytes, in_flight_bytes, files_started
@@ -277,6 +438,8 @@ def _run_rclone_process(
             err_text = f"{obj}: {msg}" if obj else msg
             if err_text and err_text not in errors:
                 errors.append(err_text)
+            if obj:
+                failed_items.append((obj, msg or "error"))
 
     rc = proc.wait()
     if cancel_check and cancel_check():
@@ -286,19 +449,22 @@ def _run_rclone_process(
             bytes_transferred=last_bytes,
             error="cancelled",
             cancelled=True,
+            failed=failed_items,
         )
-    if rc != 0:
+    if rc != 0 or failed_items:
         err_msg = "; ".join(errors[:3]) if errors else f"rclone exited with code {rc}"
         return RcloneResult(
             ok=False,
             files_transferred=files_copied,
             bytes_transferred=last_bytes,
             error=err_msg,
+            failed=failed_items,
         )
     return RcloneResult(
         ok=True,
         files_transferred=files_copied,
         bytes_transferred=last_bytes,
+        failed=failed_items,
     )
 
 
@@ -341,7 +507,7 @@ def copy_with_rclone(
     if res.ok and not is_dir and res.files_transferred == 0:
         res.files_transferred = 1
     if dst_is_rc:
-        flush_mount_cache()
+        flush_mount_cache(affected_mountpoints([dst], mounts))
     return res
 
 
@@ -413,7 +579,7 @@ def move_with_rclone(
             check=False,
         )
     if src_is_rc or dst_is_rc:
-        flush_mount_cache()
+        flush_mount_cache(affected_mountpoints([src, dst], mounts))
     return res
 
 
@@ -486,5 +652,5 @@ def batch_transfer_files_with_rclone(
                 )
 
     if src_is_rc or dst_is_rc:
-        flush_mount_cache()
+        flush_mount_cache(affected_mountpoints([src_root, dst_root], mounts))
     return res
