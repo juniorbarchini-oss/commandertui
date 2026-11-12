@@ -124,16 +124,7 @@ def execute(
                     break
                 if rc_res.ok:
                     report.succeeded += len(batch_indices)
-                elif rc_res.failed:
-                    failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
-                    for k in batch_indices:
-                        rel = queue.ops[k].rel_path
-                        norm = os.path.normpath(rel)
-                        if norm in failed_map:
-                            report.failed.append((rel, failed_map[norm]))
-                        else:
-                            report.succeeded += 1
-                elif rc_res.is_config_error:
+                elif rc_res.is_config_error and not rc_res.succeeded:
                     # Config error fallback to normal motor for batch
                     for k in batch_indices:
                         b_op = queue.ops[k]
@@ -150,6 +141,20 @@ def execute(
                             report.failed.append((b_op.rel_path, b_res.error or "transfer failed"))
                     if report.cancelled:
                         break
+                elif rc_res.failed or rc_res.succeeded:
+                    failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
+                    succeeded = {os.path.normpath(name) for name in rc_res.succeeded}
+                    for k in batch_indices:
+                        rel = queue.ops[k].rel_path
+                        norm = os.path.normpath(rel)
+                        if norm in failed_map:
+                            report.failed.append((rel, failed_map[norm]))
+                        elif norm in succeeded:
+                            report.succeeded += 1
+                        else:
+                            report.failed.append(
+                                (rel, rc_res.error or "Transfer was not confirmed by rclone")
+                            )
                 else:
                     for k in batch_indices:
                         report.failed.append((queue.ops[k].rel_path, rc_res.error or "rclone batch failed"))

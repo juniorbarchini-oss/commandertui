@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+import pytest
 from unittest.mock import patch
 
 from commandertui.conflicts import Resolution, detect_conflicts
@@ -427,6 +429,7 @@ def test_batch_transfer_reports_partial_failures_accurately(tmp_path: Path) -> N
         bytes_transferred=2,
         error="fail.txt: permission denied",
         failed=[("fail.txt", "permission denied")],
+        succeeded=["ok1.txt", "ok2.txt"],
     )
 
     with (
@@ -502,6 +505,7 @@ def test_batch_move_partial_failure_trashes_succeeded_sources(tmp_path: Path) ->
             bytes_transferred=2,
             error="fail.txt: permission denied",
             failed=[("fail.txt", "permission denied")],
+            succeeded=["ok1.txt", "ok2.txt"],
         )
 
     with (
@@ -523,3 +527,148 @@ def test_batch_move_partial_failure_trashes_succeeded_sources(tmp_path: Path) ->
     assert str(f1) in trashed
     assert str(f2) in trashed
     assert str(f3) not in trashed
+
+
+@pytest.mark.parametrize(
+    "scenario,expected",
+    [
+        ("silent_failure", []),
+        ("cancelled", []),
+        ("partial_copy", ["a.txt"]),
+        ("partial_move", ["a.txt"]),
+        ("success", ["a.txt", "b.txt"]),
+        ("unconfirmed_error", []),
+    ],
+)
+def test_batch_move_only_trashes_confirmed_uploads(tmp_path, monkeypatch, scenario, expected):
+    import os
+
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    bin_dir = tmp_path / "bin"
+    for directory in (src, dst, bin_dir):
+        directory.mkdir()
+    for name in ("a.txt", "b.txt"):
+        (src / name).write_text(name)
+    lines = ["#!/usr/bin/env python3", "import json, sys, time"]
+    if scenario in {"partial_copy", "partial_move", "cancelled"}:
+        verb = "Moved" if scenario == "partial_move" else "Copied"
+        lines.append(
+            f"print(json.dumps({{'level': 'info', 'msg': '{verb} (new)', 'object': 'a.txt'}}), file=sys.stderr, flush=True)"
+        )
+    if scenario == "unconfirmed_error":
+        lines.append(
+            "print(json.dumps({'level': 'error', 'msg': 'denied', 'object': 'b.txt'}), file=sys.stderr, flush=True)"
+        )
+    if scenario == "cancelled":
+        lines.append("time.sleep(20)")
+    lines.append("sys.exit(0)" if scenario == "success" else "sys.exit(1)")
+    fake = bin_dir / "rclone"
+    fake.write_text("\n".join(lines) + "\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    cancel = False
+
+    def progress(*args):
+        nonlocal cancel
+        cancel = scenario == "cancelled"
+
+    trashed = []
+    with (
+        patch(
+            "commandertui.rclone_bridge.send_to_trash",
+            side_effect=lambda p: trashed.append(Path(p).name) or True,
+        ),
+        patch("commandertui.rclone_bridge.flush_mount_cache"),
+    ):
+        result = batch_transfer_files_with_rclone(
+            ["a.txt", "b.txt"],
+            str(src),
+            str(dst),
+            OpKind.MOVE,
+            mounts=[RcloneMount(str(dst), "fake:")],
+            progress=progress,
+            cancel_check=lambda: cancel,
+        )
+    assert trashed == expected
+    assert result.succeeded == expected
+    assert result.files_transferred == len(expected)
+    assert result.cancelled == (scenario == "cancelled")
+    assert result.ok == (scenario == "success")
+    if not result.cancelled:
+        assert {name for name, _ in result.failed} == {"a.txt", "b.txt"} - set(expected)
+    assert all((src / name).read_text() == name for name in ("a.txt", "b.txt"))
+
+
+def test_batch_move_trash_failure_is_not_reported_as_moved(tmp_path):
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    for name in ("a.txt", "b.txt"):
+        (src / name).write_text(name)
+    with (
+        patch("commandertui.rclone_bridge._run_rclone_process", return_value=RcloneResult(ok=True)),
+        patch("commandertui.rclone_bridge.send_to_trash", side_effect=[False, True]) as trash,
+        patch("commandertui.rclone_bridge.flush_mount_cache"),
+    ):
+        result = batch_transfer_files_with_rclone(
+            ["a.txt", "b.txt"],
+            str(src),
+            str(dst),
+            OpKind.MOVE,
+            mounts=[RcloneMount(str(dst), "fake:")],
+        )
+    assert trash.call_count == 2
+    assert not result.ok
+    assert result.succeeded == ["b.txt"]
+    assert result.files_transferred == 1
+    assert result.failed == [("a.txt", f"Copied but could not trash source: {src / 'a.txt'}")]
+
+
+@pytest.mark.parametrize("engine", ["executor", "transfer"])
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_batch_reports_require_confirmed_successes(tmp_path, engine, cancelled):
+    from commandertui.models import OperationQueue, QueuedOp, OpSide
+
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    names = ["a.txt", "b.txt", "c.txt"]
+    for name in names:
+        (src / name).write_text(name)
+    result = RcloneResult(
+        ok=False,
+        cancelled=cancelled,
+        succeeded=["a.txt"],
+        failed=[("b.txt", "denied")],
+        error="batch interrupted",
+    )
+    mounts = [RcloneMount(str(dst), "fake:")]
+    with (
+        patch("commandertui.rclone_bridge.rclone_available", return_value=True),
+        patch("commandertui.rclone_bridge.detect_rclone_mounts", return_value=mounts),
+        patch("commandertui.rclone_bridge.batch_transfer_files_with_rclone", return_value=result),
+    ):
+        if engine == "executor":
+            queue = OperationQueue(
+                [QueuedOp(OpKind.MOVE, OpSide.LEFT_TO_RIGHT, name, False) for name in names]
+            )
+            report = execute(queue, str(src), str(dst))
+            count = report.succeeded
+        else:
+            sources = [str(src / name) for name in names]
+            plan = build_transfer_plan(
+                sources,
+                str(dst),
+                OpKind.MOVE,
+                detect_conflicts(sources, str(dst)),
+                ConflictPolicy(Resolution.OVERWRITE, {}),
+            )
+            report = execute_transfer_plan(plan, OpKind.MOVE)
+            count = report.copied
+    assert count == (0 if cancelled else 1)
+    assert report.cancelled == cancelled
+    if not cancelled:
+        assert {Path(name).name for name, _ in report.failed} == {"b.txt", "c.txt"}

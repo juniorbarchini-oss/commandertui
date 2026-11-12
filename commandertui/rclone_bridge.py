@@ -50,6 +50,7 @@ class RcloneResult:
     error: str | None = None
     cancelled: bool = False
     failed: list[tuple[str, str]] = field(default_factory=list)
+    succeeded: list[str] = field(default_factory=list)  # confirmed relative object paths
 
     @property
     def is_config_error(self) -> bool:
@@ -385,6 +386,7 @@ def _run_rclone_process(
                 bytes_transferred=last_bytes,
                 error="cancelled",
                 cancelled=True,
+                succeeded=sorted(succeeded_items),
             )
         try:
             line = line_queue.get(timeout=0.1)
@@ -413,7 +415,6 @@ def _run_rclone_process(
         if msg.startswith(("Copied ", "Moved ")):
             files_copied += 1
             if obj:
-                succeeded_items.add(obj)
                 succeeded_items.add(os.path.normpath(obj))
             if progress and files_started < files_copied:
                 _emit_progress(last_bytes, files_copied, current_name, 1)
@@ -454,6 +455,7 @@ def _run_rclone_process(
             error="cancelled",
             cancelled=True,
             failed=list(failed_items.items()),
+            succeeded=sorted(succeeded_items),
         )
     if rc == 0:
         return RcloneResult(
@@ -461,6 +463,7 @@ def _run_rclone_process(
             files_transferred=files_copied,
             bytes_transferred=last_bytes,
             failed=[],
+            succeeded=sorted(succeeded_items),
         )
     active_failed = [
         (obj, err)
@@ -474,6 +477,7 @@ def _run_rclone_process(
         bytes_transferred=last_bytes,
         error=err_msg,
         failed=active_failed,
+        succeeded=sorted(succeeded_items),
     )
 
 
@@ -646,19 +650,33 @@ def batch_transfer_files_with_rclone(
         except OSError:
             pass
 
-    if res.ok and res.files_transferred == 0:
-        res.files_transferred = len(rel_paths)
-
-    if kind == OpKind.MOVE and not src_is_rc:
-        failed_rels = {os.path.normpath(name) for name, _ in res.failed}
-        for rel in rel_paths:
-            norm_rel = os.path.normpath(rel)
-            if norm_rel in failed_rels:
-                continue
+    # A non-zero exit without a per-file error is not evidence of success.
+    # Freeze this before trash failures can turn an otherwise successful run into a failure.
+    confirmed = {os.path.normpath(rel) for rel in res.succeeded}
+    copy_ok = res.ok
+    local_move = kind == OpKind.MOVE and not src_is_rc
+    failed = {os.path.normpath(rel): err for rel, err in res.failed}
+    completed = []
+    for rel in rel_paths:
+        norm_rel = os.path.normpath(rel)
+        if res.cancelled:
+            continue  # Even a confirmed upload must retain its source after cancellation.
+        if not copy_ok and (norm_rel not in confirmed or norm_rel in failed):
+            failed.setdefault(norm_rel, res.error or "Transfer was not confirmed by rclone")
+            continue
+        if local_move:
             local_src = os.path.join(src_root, rel)
-            if os.path.lexists(local_src) and not send_to_trash(local_src):
+            if not os.path.lexists(local_src) or not send_to_trash(local_src):
                 res.ok = False
-                res.failed.append((rel, f"Copied but could not trash source: {local_src}"))
+                failed[norm_rel] = f"Copied but could not trash source: {local_src}"
+                continue
+        completed.append(rel)
+        failed.pop(norm_rel, None)
+    res.succeeded = completed
+    res.files_transferred = len(completed)
+    res.failed = [
+        (rel, failed[os.path.normpath(rel)]) for rel in rel_paths if os.path.normpath(rel) in failed
+    ]
 
     if src_is_rc or dst_is_rc:
         flush_mount_cache(affected_mountpoints([src_root, dst_root], mounts))

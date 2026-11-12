@@ -349,16 +349,7 @@ def execute_transfer_plan(
                         break
                     if rc_res.ok:
                         report.copied += len(batch)
-                    elif rc_res.failed:
-                        failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
-                        for it in batch:
-                            rel = os.path.relpath(it.src_abs, src_root)
-                            norm = os.path.normpath(rel)
-                            if norm in failed_map:
-                                report.failed.append((it.src_abs, failed_map[norm]))
-                            else:
-                                report.copied += 1
-                    elif rc_res.is_config_error:
+                    elif rc_res.is_config_error and not rc_res.succeeded:
                         for it in batch:
                             transfer(it.src_abs, it.dst_abs, it.replace_existing)
                             if on_item:
@@ -369,6 +360,20 @@ def execute_transfer_plan(
                             break
                         idx = j
                         continue
+                    elif rc_res.failed or rc_res.succeeded:
+                        failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
+                        succeeded = {os.path.normpath(name) for name in rc_res.succeeded}
+                        for it in batch:
+                            rel = os.path.relpath(it.src_abs, src_root)
+                            norm = os.path.normpath(rel)
+                            if norm in failed_map:
+                                report.failed.append((it.src_abs, failed_map[norm]))
+                            elif norm in succeeded:
+                                report.copied += 1
+                            else:
+                                report.failed.append(
+                                    (it.src_abs, rc_res.error or "Transfer was not confirmed by rclone")
+                                )
                     else:
                         for it in batch:
                             report.failed.append((it.src_abs, rc_res.error or "rclone batch failed"))

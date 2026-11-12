@@ -275,6 +275,14 @@ CommanderTUI includes an automatic **Turbo Copy** engine:
 - **Trash safety:** Moving files from local storage to an rclone mount copies to the remote first and only sends the local source to the desktop trash after successful transfer confirmation.
 - **Selective cache invalidation:** On completion, cache flush signals (`SIGHUP`) are sent strictly to the specific user `rclone mount` process managing the affected mountpoint, never interfering with other active rclone tasks (such as backups or syncs).
 
+### Failed or cancelled rclone batch moves
+
+Local originals go to the trash only after rclone confirms their upload,
+or after the entire batch exits successfully. A failed batch keeps every
+unconfirmed source, even when rclone emits no per-file errors. Cancelling
+keeps all local originals. Reports count only confirmed, completed moves;
+a source that could not be sent to the trash is reported as a failure.
+
 ## Archives (tar / zip)
 
 CommanderTUI supports creating and extracting archives directly between panes:
