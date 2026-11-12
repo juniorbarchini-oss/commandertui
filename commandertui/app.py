@@ -4,7 +4,7 @@ import os
 
 from textual.app import App
 
-from . import preview, settings, theme, updater
+from . import __version__, preview, settings, theme, updater
 from .boot import BootScreen
 from .main_screen import MainScreen
 
@@ -14,6 +14,7 @@ class CommanderApp(App):
     see its docstring for why that split matters for key bindings.
     """
 
+    TITLE = f"CommanderTUI {__version__}"
     CSS = theme.CSS
 
     def __init__(

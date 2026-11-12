@@ -360,7 +360,9 @@ async def test_main_bars_fit_in_120_columns(tmp_path):
     async with app.run_test(size=(120, 30)) as pilot:
         await _skip_boot(pilot)
         buttons = list(app.screen.query("FnButton"))
-        expected_count = 18 if sys.platform == "darwin" else 17
+        # 9 F-row boxes (incl. z Tar.gz / x Extract) + the top row; each row
+        # still fits 120 columns on its own when the two rows stack.
+        expected_count = 20 if sys.platform == "darwin" else 19
         assert len(buttons) == expected_count
         assert all(b.region.right <= 120 for b in buttons)
 
@@ -368,7 +370,7 @@ async def test_main_bars_fit_in_120_columns(tmp_path):
 @pytest.mark.asyncio
 async def test_bars_share_one_row_when_wide_and_stack_when_narrow(tmp_path):
     app, left, right = await _open_confirm(tmp_path, "")
-    wide_width = 230 if sys.platform == "darwin" else 210
+    wide_width = 250 if sys.platform == "darwin" else 230  # both rows side by side need 228
     async with app.run_test(size=(wide_width, 30)) as pilot:
         await _skip_boot(pilot)
         await pilot.pause()
@@ -786,7 +788,10 @@ async def test_u_checks_now_and_offers_a_new_version_ignoring_the_daily_cache(tm
     app, left, right = await _open_confirm(tmp_path, "")
     async with app.run_test(size=(140, 30)) as pilot:
         await _skip_boot(pilot)
-        await pilot.click("#fb-6")  # the Updates button
+        update_btn = next(
+            b for b in app.screen.query("FnButton") if getattr(b, "action_name", "") == "update_app"
+        )
+        await pilot.click(update_btn)
         await pilot.pause(0.3)
         assert isinstance(app.screen, UpdateScreen)
 
@@ -1342,6 +1347,43 @@ async def test_places_change_login_resets_and_reconnects(tmp_path, monkeypatch):
         assert netlocations.is_anonymous("smb://nas/HD1/")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 140])  # single- and double-size title
+async def test_boot_reveal_finishes_quickly_at_any_size(tmp_path, width):
+    import time
+
+    from commandertui.app import CommanderApp
+    from commandertui.boot import REVEAL_SECONDS
+
+    app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    start = time.monotonic()
+    async with app.run_test(size=(width, 40)) as pilot:
+        screen = app.screen
+        while not screen._done and time.monotonic() - start < 10:
+            await pilot.pause(0.05)
+        assert screen._done
+        assert time.monotonic() - start < REVEAL_SECONDS + 1.5
+
+
+@pytest.mark.asyncio
+async def test_boot_stops_waiting_for_a_slow_update_check(tmp_path, monkeypatch):
+    import time
+
+    from commandertui import boot
+    from commandertui.app import CommanderApp
+
+    monkeypatch.setattr(boot, "UPDATE_WAIT_SECONDS", 0.5)
+    app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    start = time.monotonic()
+    async with app.run_test(size=(140, 40)) as pilot:
+        app.update_state = "pending"  # the network never answers
+        screen = app.screen
+        while not screen._done and time.monotonic() - start < 10:
+            await pilot.pause(0.05)
+        assert screen._done
+        assert "LATER" in str(screen.query_one("#boot-text").render())
+
+
 async def test_boot_hint_is_centered_under_the_art(tmp_path):
     from commandertui.app import CommanderApp
 
@@ -1361,3 +1403,52 @@ async def test_boot_hint_is_centered_under_the_art(tmp_path):
         assert "ENTER" in str(hint.render())
         assert hint.region.width == art.width
         assert hint.region.x == art.x
+
+
+@pytest.mark.asyncio
+async def test_boot_screen_shows_version_in_narrow_and_wide(tmp_path):
+    from commandertui import __version__
+    from commandertui.app import CommanderApp
+    from commandertui.boot import _build_art
+
+    assert f"v{__version__}" in _build_art(scale=1)
+    assert f"v{__version__}" in _build_art(scale=2)
+
+    narrow_app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    async with narrow_app.run_test(size=(90, 30)):
+        assert narrow_app.screen.__class__.__name__ == "BootScreen"
+        assert f"v{__version__}" in narrow_app.screen.art
+
+    wide_app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    async with wide_app.run_test(size=(140, 30)):
+        assert wide_app.screen.__class__.__name__ == "BootScreen"
+        assert f"v{__version__}" in wide_app.screen.art
+
+
+@pytest.mark.asyncio
+async def test_main_screen_header_title_shows_version_and_preserves_update_sub_title(tmp_path):
+    from textual.widgets import Header
+    from commandertui import __version__
+    from commandertui.app import CommanderApp
+    from commandertui.main_screen import MainScreen
+    from commandertui.updater import UpdateInfo
+
+    app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    async with app.run_test(size=(140, 30)) as pilot:
+        if app.screen.__class__.__name__ == "BootScreen":
+            app.screen.dismiss()
+            await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)
+        assert app.title == f"CommanderTUI {__version__}"
+        header = app.screen.query_one(Header)
+        assert header.screen_title == f"CommanderTUI {__version__}"
+
+        app.update_found(UpdateInfo(current=__version__, latest="9.9.9", install="pipx"))
+        await pilot.pause(0.2)
+        assert app.sub_title == "update 9.9.9 available (press u)"
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, MainScreen)
+        assert header.screen_title == f"CommanderTUI {__version__}"
+        assert header.screen_sub_title == "update 9.9.9 available (press u)"

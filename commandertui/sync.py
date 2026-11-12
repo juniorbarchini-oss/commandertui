@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Callable
 
-from .trash import send_to_trash
+from .trash import send_to_trash, remove_path, is_remote_path
 
 ProgressCallback = Callable[[int, int, str], None]  # (bytes_done, bytes_total, current_name)
 CancelCheck = Callable[[], bool]
@@ -109,8 +109,8 @@ def move_item(
     src: str, dst: str, progress: ProgressCallback | None = None, cancel_check: CancelCheck | None = None
 ) -> TransferResult:
     """Move a file or directory. Same-filesystem moves are atomic (os.replace);
-    cross-filesystem moves fall back to copy + trash-the-source, so a failed
-    or interrupted move never leaves the source half-deleted.
+    cross-filesystem moves copy first, then trash a local source or verify
+    and permanently remove a remote source. Failed copies retain their source.
     """
     try:
         dst_dir = os.path.dirname(dst)
@@ -126,17 +126,25 @@ def move_item(
         result = copy_item(src, dst, progress, cancel_check)
         if not result.ok:
             return result
-        if not send_to_trash(src):
+        if is_remote_path(src) and not (
+            os.readlink(src) == os.readlink(dst) if os.path.islink(src) else verify_copy(src, dst)
+        ):
+            return TransferResult(ok=False, error="Copy verification failed; source retained")
+        if not remove_path(src, send_to_trash):
             return TransferResult(ok=False, error="Copied to destination but could not remove source")
         return TransferResult(ok=True)
     except Exception as e:
         return TransferResult(ok=False, error=str(e))
 
 
-def delete_item(path: str) -> TransferResult:
-    if send_to_trash(path):
+def delete_item(path: str, permanent: bool = False) -> TransferResult:
+    if is_remote_path(path) and not permanent:
+        return TransferResult(
+            ok=False, error="Permanent deletion on a network location requires confirmation"
+        )
+    if remove_path(path, send_to_trash):
         return TransferResult(ok=True)
-    return TransferResult(ok=False, error="All trash methods failed")
+    return TransferResult(ok=False, error="Could not remove item")
 
 
 def sha256_of(path: str) -> str:

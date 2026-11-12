@@ -16,9 +16,9 @@ running an unauthenticated local HTTP server. This project deliberately:
 
 - **Never opens a network port.** Pure terminal UI (Textual), no HTTP server (the only outgoing request is the update check on startup, which you can turn off),
   no webview.
-- **Never does a raw `rm -rf`.** Deletes always go through the desktop trash
-  (`send2trash` → `gio trash` → manual move into `~/.local/share/Trash`, in
-  that order).
+- **Local deletes use the desktop trash.** Network/remote deletes require an
+  explicit permanent-delete confirmation, defaulting to Cancel. Remote data
+  never enters a trash backend or gets copied into the local trash.
 - **Never overwrites in place.** Copies stream into a hidden `.tmp` file next
   to the destination and are committed with `os.replace` — a crash or
   Ctrl+C never leaves a half-written file.
@@ -113,7 +113,9 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `F5` | Copy marked (or item under cursor) to the other pane |
 | `F6` | Move marked to the other pane |
 | `F7` | Create a folder in the active pane |
-| `F8` / `Delete` | Delete marked (to trash) |
+| `F8` / `Delete` | Delete marked: local items to trash; network/remote items permanently after an explicit warning (Cancel by default) |
+| `z` | Create `.tar.gz` archive of marked items into the other pane |
+| `x` | Extract archive under cursor (`.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.tar`, `.zip`) into the other pane |
 | `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
 | `+` / `-` / `*` | Mark / unmark by pattern (`*.iso`, or plain text = contains) / invert marks, over the rows shown |
 | `u` | Check for updates now (also the **Updates** button): asks PyPI right away and offers the new version if there is one |
@@ -199,6 +201,8 @@ commandertui/
 ├── plan.py              # diff -> OperationQueue (mirror / update / two-way)
 ├── sync.py               # atomic copy/move (streamed, tmp+replace), checksum verify
 ├── trash.py               # 3-layer safe delete (send2trash / gio trash / manual)
+├── rclone_bridge.py        # Turbo Copy: parallel rclone engine for FUSE mounts
+├── archive.py              # create .tar.gz and safe extract (.tar.*, .zip)
 ├── executor.py             # runs an OperationQueue against the filesystem
 ├── bookmarks.py             # detected mounts (USB/SMB/rclone) + saved places
 ├── netlocations.py           # SMB/SFTP/FTP locations via gio (list shares, mount, save)
@@ -258,3 +262,57 @@ and failed files stay in the source. Existing files always require a decision,
 even when size and date match: Overwrite copies/moves them, while Skip (or
 Only newer for identical files) retains them. The completion message reports
 copied, skipped, failed, and identical files retained by a move.
+
+## Turbo Copy (rclone mounts)
+
+When transferring files to or from cloud storage mounted via `rclone mount` (`fuse.rclone`, such as Google Drive or OneDrive), traditional sequential POSIX file I/O over FUSE incurs one HTTP round-trip per file, making transfers of thousands of small files very slow.
+
+CommanderTUI includes an automatic **Turbo Copy** engine:
+- **Automatic detection:** Detects active `fuse.rclone` mounts from `/proc/mounts` (Linux) or `mount` (macOS) and resolves local mount paths back to their native `rclone` remote spec (e.g. `/mnt/gdrive/docs` -> `gdrive:docs`).
+- **Parallel multi-threading:** Offloads file batches and recursive folder transfers to a single parallel `rclone` worker (`--transfers 16 --checkers 16`) with live JSON progress streaming directly to the UI progress bar.
+- **Graceful cancellation:** Pressing `Esc` terminates the transfer process group cleanly (`start_new_session=True` + `killpg`), leaving no orphaned background workers.
+- **Safety fallback:** If `rclone` is not installed or returns a configuration error (e.g. remote section not found in `rclone.conf`), CommanderTUI automatically falls back to its standard atomic copy/move engine. Local folders containing symlinks also route through the standard engine to preserve symlinks properly.
+- **Trash safety:** Moving files from local storage to an rclone mount copies to the remote first and only sends the local source to the desktop trash after successful transfer confirmation.
+- **Selective cache invalidation:** On completion, cache flush signals (`SIGHUP`) are sent strictly to the specific user `rclone mount` process managing the affected mountpoint, never interfering with other active rclone tasks (such as backups or syncs).
+
+### Failed or cancelled rclone batch moves
+
+Local originals go to the trash only after rclone confirms their upload,
+or after the entire batch exits successfully. A failed batch keeps every
+unconfirmed source, even when rclone emits no per-file errors. Cancelling
+keeps all local originals. Reports count only confirmed, completed moves;
+a source that could not be sent to the trash is reported as a failure.
+
+## Archives (tar / zip)
+
+CommanderTUI supports creating and extracting archives directly between panes:
+- **`z` (Create .tar.gz):** Compresses marked items (or the item under the cursor) into a `.tar.gz` archive created in the opposite pane. If the destination is on an rclone mount, the archive is assembled in a local temporary file first and then transferred cleanly to the cloud.
+- **`x` (Extract archive):** Extracts the archive under the cursor (`.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.tar`, or `.zip`) into the opposite pane.
+- **Safe extraction:** Before extracting, CommanderTUI inspects the archive contents for existing files at the destination. If conflicts exist, a choice dialog asks whether to **Replace (old ones to trash)**, **Skip existing**, or **Cancel**.
+- **Security:** Built-in protection against directory traversal attacks (ZipSlip / Tar traversal) preventing files from extracting outside the destination folder, complemented by Python's `data_filter` on Python ≥ 3.12.
+
+### Local trash and network deletion
+
+An item is local only when its most specific mount is a known local disk
+filesystem (including `fuseblk`, `tmpfs` and the root overlay), or a Linux
+block-device mount. Unknown filesystems are treated as remote. This includes
+SMB/CIFS, GVFS, rclone/Google Drive, SFTP/sshfs, NFS and WebDAV. A server's
+own ext4 disk remains local; viewing its SMB share from another machine is remote.
+
+F8 and Compare & Sync warn before permanently deleting remote items and default
+to Cancel. Mixed batches keep local items on the trash path. Replacing remote
+destinations, archive extraction with Replace and archive overwrite also warn
+that replacement is permanent. MOVE removes a remote source directly after
+its copy is verified (rclone handles its own remote moves). Directory symlinks
+are unlinked without deleting their targets.
+
+The local trash fallback uses a same-filesystem rename only. An `EXDEV` error
+fails safely instead of downloading or copying data across filesystems.
+Cancelling stops subsequent operations; completed permanent deletions cannot
+be undone. A completed or failed worker always closes its progress screen.
+
+Delete confirmations show GVFS connection URIs (for example
+`smb://server/share`) or the mount path and filesystem type. The extra note about
+local items going to trash appears only for mixed selections. File sizes come from metadata; folder or
+unreadable sizes stay unknown and suppress the total instead of showing zero
+or scanning a remote tree before confirmation.
