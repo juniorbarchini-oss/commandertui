@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 from unittest.mock import patch
 
+from commandertui import rclone_bridge
 from commandertui.conflicts import Resolution, detect_conflicts
 from commandertui.diff import compare
 from commandertui.executor import execute
@@ -427,6 +429,7 @@ def test_batch_transfer_reports_partial_failures_accurately(tmp_path: Path) -> N
         bytes_transferred=2,
         error="fail.txt: permission denied",
         failed=[("fail.txt", "permission denied")],
+        succeeded=["ok1.txt", "ok2.txt"],
     )
 
     with (
@@ -502,6 +505,7 @@ def test_batch_move_partial_failure_trashes_succeeded_sources(tmp_path: Path) ->
             bytes_transferred=2,
             error="fail.txt: permission denied",
             failed=[("fail.txt", "permission denied")],
+            succeeded=["ok1.txt", "ok2.txt"],
         )
 
     with (
@@ -523,3 +527,151 @@ def test_batch_move_partial_failure_trashes_succeeded_sources(tmp_path: Path) ->
     assert str(f1) in trashed
     assert str(f2) in trashed
     assert str(f3) not in trashed
+
+
+def test_batch_move_exit_1_no_output_trashes_nothing(tmp_path: Path) -> None:
+    """If rclone exits with error (e.g. crash, exit 1) without confirming copies, no sources are trashed."""
+    src_root = tmp_path / "src"
+    src_root.mkdir()
+    f1 = src_root / "a.txt"
+    f2 = src_root / "b.txt"
+    f1.write_text("a", encoding="utf-8")
+    f2.write_text("b", encoding="utf-8")
+
+    dst_root = tmp_path / "dst"
+    dst_root.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_root), remote="gdrive:")]
+    trashed: list[str] = []
+
+    def _fake_run_rclone(cmd, progress, cancel_check, default_name):
+        return RcloneResult(
+            ok=False,
+            files_transferred=0,
+            bytes_transferred=0,
+            error="rclone exited with code 1",
+            failed=[],
+            succeeded=[],
+        )
+
+    with (
+        patch("commandertui.rclone_bridge._run_rclone_process", side_effect=_fake_run_rclone),
+        patch("commandertui.rclone_bridge.send_to_trash", side_effect=lambda p: trashed.append(p) or True),
+        patch("commandertui.rclone_bridge.flush_mount_cache"),
+    ):
+        res = batch_transfer_files_with_rclone(
+            ["a.txt", "b.txt"],
+            str(src_root),
+            str(dst_root),
+            kind=OpKind.MOVE,
+            mounts=mounts,
+        )
+
+    assert res.ok is False
+    assert trashed == []
+    assert f1.exists()
+    assert f2.exists()
+
+
+def test_batch_move_cancelled_trashes_nothing(tmp_path: Path) -> None:
+    """If transfer is cancelled, sources are never trashed even if files were copied."""
+    src_root = tmp_path / "src"
+    src_root.mkdir()
+    f1 = src_root / "a.txt"
+    f2 = src_root / "b.txt"
+    f1.write_text("a", encoding="utf-8")
+    f2.write_text("b", encoding="utf-8")
+
+    dst_root = tmp_path / "dst"
+    dst_root.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_root), remote="gdrive:")]
+    trashed: list[str] = []
+
+    def _fake_run_rclone(cmd, progress, cancel_check, default_name):
+        return RcloneResult(
+            ok=False,
+            cancelled=True,
+            error="cancelled",
+            failed=[],
+            succeeded=["a.txt"],
+        )
+
+    with (
+        patch("commandertui.rclone_bridge._run_rclone_process", side_effect=_fake_run_rclone),
+        patch("commandertui.rclone_bridge.send_to_trash", side_effect=lambda p: trashed.append(p) or True),
+        patch("commandertui.rclone_bridge.flush_mount_cache"),
+    ):
+        res = batch_transfer_files_with_rclone(
+            ["a.txt", "b.txt"],
+            str(src_root),
+            str(dst_root),
+            kind=OpKind.MOVE,
+            mounts=mounts,
+        )
+
+    assert res.cancelled is True
+    assert trashed == []
+    assert f1.exists()
+    assert f2.exists()
+
+
+def test_batch_move_partial_failure_trashes_only_confirmed_succeeded(tmp_path: Path) -> None:
+    """If rclone fails partially with 1 confirmed copied, only that confirmed file is trashed."""
+    src_root = tmp_path / "src"
+    src_root.mkdir()
+    f1 = src_root / "copied.txt"
+    f2 = src_root / "failed.txt"
+    f1.write_text("ok", encoding="utf-8")
+    f2.write_text("err", encoding="utf-8")
+
+    dst_root = tmp_path / "dst"
+    dst_root.mkdir()
+
+    mounts = [RcloneMount(mountpoint=str(dst_root), remote="gdrive:")]
+    trashed: list[str] = []
+
+    def _fake_run_rclone(cmd, progress, cancel_check, default_name):
+        return RcloneResult(
+            ok=False,
+            files_transferred=1,
+            bytes_transferred=2,
+            error="failed.txt: network timeout",
+            failed=[("failed.txt", "network timeout")],
+            succeeded=["copied.txt"],
+        )
+
+    with (
+        patch("commandertui.rclone_bridge._run_rclone_process", side_effect=_fake_run_rclone),
+        patch("commandertui.rclone_bridge.send_to_trash", side_effect=lambda p: trashed.append(p) or True),
+        patch("commandertui.rclone_bridge.flush_mount_cache"),
+    ):
+        res = batch_transfer_files_with_rclone(
+            ["copied.txt", "failed.txt"],
+            str(src_root),
+            str(dst_root),
+            kind=OpKind.MOVE,
+            mounts=mounts,
+        )
+
+    assert res.ok is False
+    assert trashed == [str(f1)]
+    assert f2.exists()
+
+
+def test_run_rclone_process_collects_succeeded_and_failed(tmp_path: Path) -> None:
+    """Verify _run_rclone_process populates succeeded from Copied messages and active failed."""
+    script = tmp_path / "fake_rclone.py"
+    script.write_text(
+        "import sys, json\n"
+        "sys.stderr.write(json.dumps({'level': 'info', 'msg': 'Copied (new)', 'object': 'a.txt'}) + '\\n')\n"
+        "sys.stderr.write(json.dumps({'level': 'error', 'msg': 'denied', 'object': 'b.txt'}) + '\\n')\n"
+        "sys.stderr.flush()\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    cmd = [sys.executable, str(script)]
+    res = rclone_bridge._run_rclone_process(cmd)
+    assert res.ok is False
+    assert res.succeeded == ["a.txt"]
+    assert res.failed == [("b.txt", "denied")]
