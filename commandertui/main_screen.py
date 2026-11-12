@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 
 from textual.app import ComposeResult
@@ -10,7 +11,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from . import __version__, editor, netlocations, preview, theme, updater
+from . import __version__, archive, editor, netlocations, preview, theme, updater
 from .modals import (
     ADD_NETWORK,
     CHANGE_LOGIN,
@@ -25,7 +26,6 @@ from .modals import (
 from .models import OpKind, OpSide, OperationQueue, QueuedOp
 from .run_queue import run_queue_with_progress
 from .run_transfer import run_transfer
-from .scanner import path_size
 from .widgets import PARENT_MARK, FilePanel, FunctionBar, MainTopBar
 
 LOGIN_ANON = "Anonymous (no login)"
@@ -41,6 +41,8 @@ class MainScreen(Screen):
     screen (BootScreen, CompareScreen, a modal) is on top of the stack, so
     anything pane-specific has to live here, not on CommanderApp.
     """
+
+    TITLE = f"CommanderTUI {__version__}"
 
     # priority=True: the focused DataTable has built-in bindings for several
     # of these same keys (notably Enter, which it uses internally to fire
@@ -68,6 +70,8 @@ class MainScreen(Screen):
         Binding("f7", "make_dir", "MkDir", priority=True),
         Binding("f8", "delete", "Delete", priority=True),
         Binding("delete", "delete", "Delete", priority=True),
+        Binding("z", "create_archive", "Tar.gz", priority=True),
+        Binding("x", "extract_archive", "Extract", priority=True),
         Binding("c", "show_compare", "Compare", priority=True),
         Binding("p", "show_places", "Places", priority=True),
         Binding("r", "refresh_both", "Refresh", priority=True),
@@ -476,7 +480,13 @@ class MainScreen(Screen):
         queue = OperationQueue()
         for item in items:
             rel_path = os.path.relpath(item, src_panel.path)
-            queue.add(QueuedOp(OpKind.DELETE, side, rel_path, os.path.isdir(item), size=path_size(item)))
+            try:
+                info = os.lstat(item)
+                is_dir = stat.S_ISDIR(info.st_mode)
+                size = None if is_dir else info.st_size
+            except OSError:
+                is_dir, size = False, None
+            queue.add(QueuedOp(OpKind.DELETE, side, rel_path, is_dir, size=size))
 
         def after(report) -> None:
             src_panel.marked.clear()
@@ -495,6 +505,32 @@ class MainScreen(Screen):
             return
 
         run_transfer(self, kind, label, src_panel, dst_panel, items)
+
+    def action_create_archive(self) -> None:
+        src_panel = self._active_panel()
+        dst_panel = self._other_panel()
+        items = src_panel.marked_or_selected()
+        if not items:
+            self._nothing_selected()
+            return
+        archive.run_create_archive(self, src_panel, dst_panel, items)
+
+    def action_extract_archive(self) -> None:
+        src_panel = self._active_panel()
+        dst_panel = self._other_panel()
+        name = src_panel.selected_name()
+        if not name or name == PARENT_MARK:
+            self._nothing_selected()
+            return
+        path = os.path.join(src_panel.path, name)
+        if os.path.isdir(path) or not archive.is_supported_archive(path):
+            self.app.push_screen(
+                MessageScreen(
+                    "Select an archive file (.tar.gz, .tgz, .tar.bz2, .tar.xz, .tar, or .zip) to extract."
+                )
+            )
+            return
+        archive.run_extract_archive(self, src_panel, dst_panel, path)
 
     # ------------------------------------------------------------- misc
     def action_show_compare(self) -> None:

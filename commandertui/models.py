@@ -54,7 +54,8 @@ class QueuedOp:
     side: OpSide
     rel_path: str
     is_dir: bool
-    size: int = 0
+    size: int | None = 0  # None means unknown; do not display a partial total
+    permanent: bool = False  # user confirmed a remote DELETE
 
 
 @dataclass
@@ -72,8 +73,12 @@ class OperationQueue:
         total_bytes = 0
         for op in self.ops:
             by_kind[op.kind.value] = by_kind.get(op.kind.value, 0) + 1
-            total_bytes += op.size
-        return {"count": len(self.ops), "by_kind": by_kind, "total_bytes": total_bytes}
+            total_bytes += op.size or 0
+        return {
+            "count": len(self.ops),
+            "by_kind": by_kind,
+            "total_bytes": total_bytes if all(op.size is not None for op in self.ops) else None,
+        }
 
     def __len__(self) -> int:
         return len(self.ops)

@@ -15,7 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Literal
 
-from . import sync
+from . import rclone_bridge, sync
 from .conflicts import ConflictReport, Resolution, allowed_resolutions, rename_target, resolve
 from .models import EntryKind, OpKind
 from .scanner import scan_directory
@@ -208,6 +208,7 @@ def execute_transfer_plan(
         raise ValueError(f"Unsupported operation: {kind}")
     report = TransferReport()
     cleanup: set[str] = set()
+    mounts = rclone_bridge.detect_rclone_mounts() if rclone_bridge.rclone_available() else []
 
     def cancelled():
         if cancel_check and cancel_check():
@@ -215,7 +216,7 @@ def execute_transfer_plan(
             return True
         return False
 
-    def transfer(src, dst, replace_existing):
+    def transfer(src, dst, replace_existing, allow_rclone: bool = True):
         if cancelled():
             return
         try:
@@ -231,8 +232,27 @@ def execute_transfer_plan(
             if dst_exists and not replace_existing:
                 raise FileExistsError(dst)
             if dst_exists and (src_dir != dst_dir or os.path.islink(src) or os.path.islink(dst)):
-                if not sync.send_to_trash(dst):
+                if not sync.remove_path(dst, sync.send_to_trash):
                     raise OSError("Could not trash existing destination")
+            has_symlinks = src_dir and rclone_bridge.tree_has_symlinks(src)
+            if (
+                allow_rclone
+                and mounts
+                and not os.path.islink(src)
+                and not has_symlinks
+                and rclone_bridge.is_rclone_transfer(src, dst, mounts)
+            ):
+                fn = rclone_bridge.copy_with_rclone if kind == OpKind.COPY else rclone_bridge.move_with_rclone
+                rc_res = fn(src, dst, src_dir, replace_existing, progress, cancel_check, mounts)
+                if rc_res.cancelled:
+                    report.cancelled = True
+                    return
+                if rc_res.ok:
+                    report.copied += rc_res.files_transferred
+                    return
+                if not rc_res.is_config_error:
+                    raise OSError(rc_res.error or "rclone transfer failed")
+                # When rc_res.is_config_error is True, fall through to normal motor below!
             if src_dir:
                 os.makedirs(dst, exist_ok=True)
                 if kind == OpKind.MOVE:
@@ -240,7 +260,12 @@ def execute_transfer_plan(
                 with os.scandir(src) as entries:
                     children = sorted(entries, key=lambda e: e.name)
                 for entry in children:
-                    transfer(entry.path, os.path.join(dst, entry.name), replace_existing)
+                    transfer(
+                        entry.path,
+                        os.path.join(dst, entry.name),
+                        replace_existing,
+                        allow_rclone=allow_rclone and not has_symlinks,
+                    )
                     if report.cancelled:
                         break
                 return
@@ -258,15 +283,30 @@ def execute_transfer_plan(
                 )
                 if not verified:
                     raise OSError("Copy verification failed; source retained")
-                if not sync.send_to_trash(src):
+                if not sync.remove_path(src, sync.send_to_trash):
                     raise OSError("Copied but could not trash source")
             report.copied += 1
         except Exception as error:
             report.failed.append((src, str(error)))
 
-    for item in plan.items:
+    def _can_batch_rclone_file(it: TransferItem) -> bool:
+        if not mounts or it.action != "copy" or it.is_dir_whole:
+            return False
+        if os.path.basename(it.src_abs) != os.path.basename(it.dst_abs):
+            return False
+        if os.path.islink(it.src_abs) or os.path.isdir(it.src_abs):
+            return False
+        if os.path.lexists(it.dst_abs):
+            if not it.replace_existing or os.path.isdir(it.dst_abs) or os.path.islink(it.dst_abs):
+                return False
+        return rclone_bridge.is_rclone_transfer(it.src_abs, it.dst_abs, mounts)
+
+    idx = 0
+    n_items = len(plan.items)
+    while idx < n_items:
         if cancelled():
             break
+        item = plan.items[idx]
         if item.action == "skip":
             report.skipped.append(item.src_abs)
             kept = [
@@ -278,12 +318,78 @@ def execute_transfer_plan(
                 path for path in kept if path not in report.identical_kept_paths
             )
             report.identical_kept = len(report.identical_kept_paths)
-        else:
-            transfer(item.src_abs, item.dst_abs, item.replace_existing)
+            if on_item:
+                on_item(item, report)
+            idx += 1
+            continue
+
+        if _can_batch_rclone_file(item):
+            batch = [item]
+            j = idx + 1
+            while j < n_items and _can_batch_rclone_file(plan.items[j]):
+                batch.append(plan.items[j])
+                j += 1
+            if len(batch) >= 2:
+                src_root = os.path.commonpath([os.path.dirname(it.src_abs) for it in batch])
+                dst_root = os.path.commonpath([os.path.dirname(it.dst_abs) for it in batch])
+                rels = [os.path.relpath(it.src_abs, src_root) for it in batch]
+                if all(rel == os.path.relpath(it.dst_abs, dst_root) for rel, it in zip(rels, batch)):
+                    rc_res = rclone_bridge.batch_transfer_files_with_rclone(
+                        rels,
+                        src_root,
+                        dst_root,
+                        kind,
+                        replace_existing=any(it.replace_existing for it in batch),
+                        progress=progress,
+                        cancel_check=cancel_check,
+                        mounts=mounts,
+                    )
+                    if rc_res.cancelled:
+                        report.cancelled = True
+                        break
+                    if rc_res.ok:
+                        report.copied += len(batch)
+                    elif rc_res.is_config_error and not rc_res.succeeded:
+                        for it in batch:
+                            transfer(it.src_abs, it.dst_abs, it.replace_existing)
+                            if on_item:
+                                on_item(it, report)
+                            if report.cancelled:
+                                break
+                        if report.cancelled:
+                            break
+                        idx = j
+                        continue
+                    elif rc_res.failed or rc_res.succeeded:
+                        failed_map = {os.path.normpath(name): err for name, err in rc_res.failed}
+                        succeeded = {os.path.normpath(name) for name in rc_res.succeeded}
+                        for it in batch:
+                            rel = os.path.relpath(it.src_abs, src_root)
+                            norm = os.path.normpath(rel)
+                            if norm in failed_map:
+                                report.failed.append((it.src_abs, failed_map[norm]))
+                            elif norm in succeeded:
+                                report.copied += 1
+                            else:
+                                report.failed.append(
+                                    (it.src_abs, rc_res.error or "Transfer was not confirmed by rclone")
+                                )
+                    else:
+                        for it in batch:
+                            report.failed.append((it.src_abs, rc_res.error or "rclone batch failed"))
+                    for it in batch:
+                        if on_item:
+                            on_item(it, report)
+                    idx = j
+                    continue
+
+        transfer(item.src_abs, item.dst_abs, item.replace_existing)
         if on_item:
             on_item(item, report)
         if report.cancelled:
             break
+        idx += 1
+
     if kind == OpKind.MOVE and report.ok:
         cleanup.update(plan.source_dirs)
         for directory in sorted(cleanup, key=lambda p: p.count(os.sep), reverse=True):
