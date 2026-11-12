@@ -6,6 +6,7 @@ from textual.screen import Screen
 from textual.containers import Vertical
 from textual.widgets import Static
 
+from . import __version__
 from .ascii_font import banner
 
 CURSOR = "█"  # solid block, like a CRT text cursor
@@ -24,6 +25,7 @@ def _build_art(scale: int = 1, update_status: str = "OK") -> str:
     body_lines = [
         "",
         "T U I  --  dual-pane file manager",
+        f"v{__version__}",
         "",
         _line("CONNECT 2400", "OK"),
         _line("LOADING PANELS", "OK"),

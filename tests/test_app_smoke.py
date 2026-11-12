@@ -1366,3 +1366,52 @@ async def test_boot_hint_is_centered_under_the_art(tmp_path):
         assert "ENTER" in str(hint.render())
         assert hint.region.width == art.width
         assert hint.region.x == art.x
+
+
+@pytest.mark.asyncio
+async def test_boot_screen_shows_version_in_narrow_and_wide(tmp_path):
+    from commandertui import __version__
+    from commandertui.app import CommanderApp
+    from commandertui.boot import _build_art
+
+    assert f"v{__version__}" in _build_art(scale=1)
+    assert f"v{__version__}" in _build_art(scale=2)
+
+    narrow_app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    async with narrow_app.run_test(size=(90, 30)):
+        assert narrow_app.screen.__class__.__name__ == "BootScreen"
+        assert f"v{__version__}" in narrow_app.screen.art
+
+    wide_app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    async with wide_app.run_test(size=(140, 30)):
+        assert wide_app.screen.__class__.__name__ == "BootScreen"
+        assert f"v{__version__}" in wide_app.screen.art
+
+
+@pytest.mark.asyncio
+async def test_main_screen_header_title_shows_version_and_preserves_update_sub_title(tmp_path):
+    from textual.widgets import Header
+    from commandertui import __version__
+    from commandertui.app import CommanderApp
+    from commandertui.main_screen import MainScreen
+    from commandertui.updater import UpdateInfo
+
+    app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    async with app.run_test(size=(140, 30)) as pilot:
+        if app.screen.__class__.__name__ == "BootScreen":
+            app.screen.dismiss()
+            await pilot.pause()
+
+        assert isinstance(app.screen, MainScreen)
+        assert app.title == f"CommanderTUI {__version__}"
+        header = app.screen.query_one(Header)
+        assert header.screen_title == f"CommanderTUI {__version__}"
+
+        app.update_found(UpdateInfo(current=__version__, latest="9.9.9", install="pipx"))
+        await pilot.pause(0.2)
+        assert app.sub_title == "update 9.9.9 available (press u)"
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, MainScreen)
+        assert header.screen_title == f"CommanderTUI {__version__}"
+        assert header.screen_sub_title == "update 9.9.9 available (press u)"

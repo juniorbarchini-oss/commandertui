@@ -42,6 +42,8 @@ class MainScreen(Screen):
     anything pane-specific has to live here, not on CommanderApp.
     """
 
+    TITLE = f"CommanderTUI {__version__}"
+
     # priority=True: the focused DataTable has built-in bindings for several
     # of these same keys (notably Enter, which it uses internally to fire
     # RowSelected) that would otherwise intercept the key before our action
