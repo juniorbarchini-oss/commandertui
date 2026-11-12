@@ -104,3 +104,105 @@ def test_extract_archive_rejects_path_traversal(tmp_path: Path) -> None:
     assert res.ok is False
     assert res.error is not None and "Unsafe archive member" in res.error
     assert not (tmp_path / "escaped.txt").exists()
+
+
+def test_extract_archive_conflict_skip_and_replace_tar(tmp_path: Path) -> None:
+    """extract_archive respects conflict_policy='skip' and 'replace' with trash for tar archives."""
+    from unittest.mock import patch
+    from commandertui.archive import get_archive_existing_targets
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "file.txt").write_text("new content", encoding="utf-8")
+    arc_path = tmp_path / "test.tar.gz"
+    create_tar_gz([str(src_dir / "file.txt")], str(arc_path))
+
+    dst_dir = tmp_path / "dst"
+    dst_dir.mkdir()
+    existing_file = dst_dir / "file.txt"
+    existing_file.write_text("old content", encoding="utf-8")
+
+    conflicts = get_archive_existing_targets(str(arc_path), str(dst_dir))
+    assert conflicts == [str(existing_file)]
+
+    # Test conflict_policy="skip"
+    res_skip = extract_archive(str(arc_path), str(dst_dir), conflict_policy="skip")
+    assert res_skip.ok is True
+    assert existing_file.read_text(encoding="utf-8") == "old content"
+
+    # Test conflict_policy="replace"
+    trashed: list[str] = []
+    with patch("commandertui.archive.send_to_trash", side_effect=lambda p: trashed.append(p) or True):
+        res_replace = extract_archive(str(arc_path), str(dst_dir), conflict_policy="replace")
+
+    assert res_replace.ok is True
+    assert trashed == [str(existing_file)]
+    assert existing_file.read_text(encoding="utf-8") == "new content"
+
+
+def test_extract_archive_conflict_skip_and_replace_zip(tmp_path: Path) -> None:
+    """extract_archive respects conflict_policy='skip' and 'replace' with trash for zip archives."""
+    import zipfile
+    from unittest.mock import patch
+    from commandertui.archive import get_archive_existing_targets
+
+    zip_path = tmp_path / "test.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("notes.txt", "zip new content")
+
+    dst_dir = tmp_path / "dst_zip"
+    dst_dir.mkdir()
+    existing_file = dst_dir / "notes.txt"
+    existing_file.write_text("zip old content", encoding="utf-8")
+
+    conflicts = get_archive_existing_targets(str(zip_path), str(dst_dir))
+    assert conflicts == [str(existing_file)]
+
+    res_skip = extract_archive(str(zip_path), str(dst_dir), conflict_policy="skip")
+    assert res_skip.ok is True
+    assert existing_file.read_text(encoding="utf-8") == "zip old content"
+
+    trashed: list[str] = []
+    with patch("commandertui.archive.send_to_trash", side_effect=lambda p: trashed.append(p) or True):
+        res_replace = extract_archive(str(zip_path), str(dst_dir), conflict_policy="replace")
+
+    assert res_replace.ok is True
+    assert trashed == [str(existing_file)]
+    assert existing_file.read_text(encoding="utf-8") == "zip new content"
+
+
+def test_create_tar_gz_on_rclone_mount_does_not_double_counts(tmp_path: Path) -> None:
+    """Creating an archive destined for an rclone mount counts exact files and bytes."""
+    from unittest.mock import patch
+    from commandertui.rclone_bridge import RcloneMount, RcloneResult
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "a.txt").write_text("AAA", encoding="utf-8")
+    (src_dir / "b.txt").write_text("BBBB", encoding="utf-8")
+
+    fake_cloud = tmp_path / "cloud_backing"
+    fake_mount = tmp_path / "mnt_gdrive"
+    fake_mount.mkdir()
+    out_arc = fake_mount / "backup.tar.gz"
+
+    mounts = [RcloneMount(mountpoint=str(fake_mount), remote=str(fake_cloud))]
+    progress_calls: list[tuple[int, int, str]] = []
+
+    with (
+        patch("commandertui.archive.detect_rclone_mounts", return_value=mounts),
+        patch("commandertui.archive.rclone_available", return_value=True),
+        patch(
+            "commandertui.archive.copy_with_rclone",
+            return_value=RcloneResult(ok=True, files_transferred=1, bytes_transferred=100),
+        ),
+    ):
+        res = create_tar_gz(
+            [str(src_dir / "a.txt"), str(src_dir / "b.txt")],
+            str(out_arc),
+            progress=lambda d, t, n: progress_calls.append((d, t, n)),
+        )
+
+    assert res.ok is True
+    assert res.files_processed == 2
+    assert res.bytes_processed == 7

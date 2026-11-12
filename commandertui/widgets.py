@@ -42,7 +42,7 @@ def _format_bytes(n: int) -> str:
 
 
 def _free_space_label(path: str) -> str:
-    """ "48.2 GB free" for the filesystem under `path`, or "" if it can't say
+    """Free space label: "48.2 GB free" for the filesystem under `path`, or "" if it can't say
     (permission, vanished mount, FUSE that reports nothing)."""
     try:
         usage = shutil.disk_usage(path)
@@ -276,7 +276,7 @@ class FilePanel(Vertical):
             self._spinner = None
 
     def update_selection(self) -> None:
-        """ "4 marked  1.2 GB" in the path row, so the volume is known before
+        """Selection summary: "4 marked  1.2 GB" in the path row, so the volume is known before
         pressing F5/F8. Folder sizes are counted in a worker (a big tree or a
         network share must not freeze the UI); the label shows the files'
         total meanwhile."""

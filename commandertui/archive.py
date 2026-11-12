@@ -7,9 +7,8 @@ Features:
   paths are rejected before touching disk).
 - Cloud-mount aware (`fuse.rclone`): when the archive lives on an `rclone`
   mount (e.g. `/mnt/gdrive`), creating an archive builds it in a local temp
-  file and uploads it via `rclone_bridge.copy_with_rclone`; extracting downloads
-  a temp copy first if needed and flushes the mount cache when writing into a
-  mounted destination.
+  file and uploads it via `rclone_bridge.copy_with_rclone`, flushing the mount
+  cache when writing into a mounted destination.
 """
 
 from __future__ import annotations
@@ -214,7 +213,7 @@ def create_tar_gz(
                 out_abs,
                 is_dir=False,
                 replace_existing=True,
-                progress=progress,
+                progress=None,
                 cancel_check=cancel_check,
                 mounts=mounts,
             )
@@ -295,11 +294,44 @@ def _validate_tar_member(member: tarfile.TarInfo, dest_dir: str) -> str:
     return target
 
 
+def get_archive_existing_targets(archive_path: str, dest_dir: str) -> list[str]:
+    """Return existing filesystem paths that would be overwritten by extracting `archive_path` into `dest_dir`."""
+    arc_abs = os.path.abspath(archive_path)
+    dst_abs = os.path.abspath(dest_dir)
+    existing: set[str] = set()
+
+    try:
+        if arc_abs.lower().endswith(".zip") and zipfile.is_zipfile(arc_abs):
+            with zipfile.ZipFile(arc_abs, "r") as zf:
+                for info in zf.infolist():
+                    norm = os.path.normpath(info.filename.lstrip("/"))
+                    if not norm or norm == ".":
+                        continue
+                    target = os.path.join(dst_abs, norm)
+                    if os.path.lexists(target):
+                        existing.add(target)
+        else:
+            with tarfile.open(arc_abs, mode="r:*") as tf:
+                for member in tf.getmembers():
+                    name = member.name.lstrip("/")
+                    if not name or name == ".":
+                        continue
+                    norm = os.path.normpath(name)
+                    target = os.path.join(dst_abs, norm)
+                    if os.path.lexists(target):
+                        existing.add(target)
+    except Exception:
+        pass
+
+    return sorted(existing)
+
+
 def extract_archive(
     archive_path: str,
     dest_dir: str,
     progress: ProgressCallback | None = None,
     cancel_check: CancelCheck | None = None,
+    conflict_policy: str = "replace",
 ) -> ArchiveResult:
     """Safely extract `.tar.gz`/`.tgz`/`.tar.*`/`.zip` into `dest_dir`."""
     arc_abs = os.path.abspath(archive_path)
@@ -332,6 +364,12 @@ def extract_archive(
                         raise InterruptedError("cancelled")
                     norm = os.path.normpath(info.filename)
                     target = os.path.abspath(os.path.join(dst_abs, norm))
+                    if os.path.lexists(target):
+                        if conflict_policy == "skip":
+                            continue
+                        if not os.path.isdir(target) or os.path.islink(target) or not info.is_dir():
+                            if not send_to_trash(target):
+                                raise OSError(f"Could not trash existing destination: {target}")
                     if info.is_dir():
                         os.makedirs(target, exist_ok=True)
                         continue
@@ -362,6 +400,11 @@ def extract_archive(
                     if cancel_check and cancel_check():
                         raise InterruptedError("cancelled")
                     _validate_tar_member(member, dst_abs)
+                    if hasattr(tarfile, "data_filter"):
+                        try:
+                            tarfile.data_filter(member, dst_abs)
+                        except Exception as e:
+                            raise ValueError(f"Tar member rejected by data filter: {member.name} ({e})")
 
                 for member in members:
                     if cancel_check and cancel_check():
@@ -369,6 +412,12 @@ def extract_archive(
                     target = _validate_tar_member(member, dst_abs)
                     if target == dst_abs:
                         continue
+                    if os.path.lexists(target):
+                        if conflict_policy == "skip":
+                            continue
+                        if not os.path.isdir(target) or os.path.islink(target) or not member.isdir():
+                            if not send_to_trash(target):
+                                raise OSError(f"Could not trash existing destination: {target}")
                     if member.isdir():
                         os.makedirs(target, exist_ok=True)
                         continue
@@ -404,14 +453,15 @@ def extract_archive(
                     elif member.issym() or member.islnk():
                         os.makedirs(os.path.dirname(target), exist_ok=True)
                         if os.path.lexists(target):
-                            os.remove(target)
+                            if not send_to_trash(target):
+                                os.remove(target)
                         if member.issym():
                             os.symlink(member.linkname, target)
                         else:
                             os.link(os.path.join(dst_abs, member.linkname), target)
 
         if dst_is_rclone:
-            flush_mount_cache()
+            flush_mount_cache(affected_mountpoints([dst_abs], mounts))
 
         return ArchiveResult(
             ok=True,
@@ -573,6 +623,32 @@ def run_extract_archive(owner, src_panel, dst_panel, archive_path: str) -> None:
         else:
             target_dir = src_panel.path
 
+        existing = get_archive_existing_targets(archive_path, target_dir)
+        if existing:
+
+            def on_conflict(conflict_choice: str | None) -> None:
+                if not conflict_choice or conflict_choice == "Cancel":
+                    return
+                policy = "replace" if conflict_choice.startswith("Replace") else "skip"
+                _start_extract(target_dir, policy)
+
+            prompt = f"{len(existing)} item(s) already exist in {target_dir}:\n" + "\n".join(
+                f"  {os.path.relpath(p, target_dir)}" for p in existing[:5]
+            )
+            if len(existing) > 5:
+                prompt += f"\n  ... and {len(existing) - 5} more"
+            owner.app.push_screen(
+                ChoiceScreen(
+                    prompt,
+                    ["Replace (old ones to trash)", "Skip existing", "Cancel"],
+                    initial=0,
+                ),
+                on_conflict,
+            )
+        else:
+            _start_extract(target_dir, "replace")
+
+    def _start_extract(target_dir: str, conflict_policy: str) -> None:
         progress = ProgressScreen(f"Extracting {arc_name} to {target_dir}", 1)
         owner.app.push_screen(progress)
 
@@ -601,7 +677,13 @@ def run_extract_archive(owner, src_panel, dst_panel, archive_path: str) -> None:
                     last = now
                     owner.app.call_from_thread(progress.report, replace(status))
 
-            res = extract_archive(archive_path, target_dir, update, lambda: progress.cancel_requested)
+            res = extract_archive(
+                archive_path,
+                target_dir,
+                update,
+                lambda: progress.cancel_requested,
+                conflict_policy=conflict_policy,
+            )
             owner.app.call_from_thread(finish, res)
 
         def finish(res: ArchiveResult) -> None:
