@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import time
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
@@ -12,6 +15,13 @@ from .ascii_font import banner
 CURSOR = "█"  # solid block, like a CRT text cursor
 SPINNER = "|/-\\"
 LINE_WIDTH = 44  # fixed, so a status changing later never moves the box
+# The whole picture is drawn in this time, whatever its size: the double-size
+# title is ~2200 characters, and a fixed speed took ~26 s to draw it.
+REVEAL_SECONDS = 2.0
+# Longest the reveal parks before READY. waiting on the update check (whose
+# network timeout is 4 s); after that it finishes and says LATER -- a newer
+# version is still offered when the answer arrives.
+UPDATE_WAIT_SECONDS = 2.8
 WIDE_ENOUGH = 114  # terminal columns for the double-size title (110 wide with its box)
 
 
@@ -103,6 +113,7 @@ class BootScreen(Screen):
         self._pos = 0
         self._timer = None
         self._done = False
+        self._started: float | None = None
 
     def compose(self) -> ComposeResult:
         # No Center/Middle wrapper containers: those default to width 100%,
@@ -117,17 +128,28 @@ class BootScreen(Screen):
     def on_mount(self) -> None:
         # Double-size title when the window is wide enough for it.
         self._scale = 2 if self.app.size.width >= WIDE_ENOUGH else 1
+        self._started = time.monotonic()
+        # Characters per tick so the picture at this scale is drawn in REVEAL_SECONDS.
+        ticks = max(1, int(REVEAL_SECONDS / self.tick_seconds))
+        self.chars_per_tick = max(self.chars_per_tick, math.ceil(len(self._current_art()) / ticks))
         self._timer = self.set_interval(self.tick_seconds, self._tick)
 
+    def _update_wait_over(self) -> bool:
+        return self._started is not None and time.monotonic() - self._started >= UPDATE_WAIT_SECONDS
+
     def _pending(self) -> bool:
-        return self.fixed_art is None and getattr(self.app, "update_state", "off") == "pending"
+        return (
+            self.fixed_art is None
+            and getattr(self.app, "update_state", "off") == "pending"
+            and not self._update_wait_over()
+        )
 
     def _current_art(self) -> str:
         if self.fixed_art is not None:
             return self.fixed_art
         state = getattr(self.app, "update_state", "off")
         if state == "pending":
-            status = SPINNER[self._frame % 4]
+            status = "LATER" if self._update_wait_over() else SPINNER[self._frame % 4]
         else:
             status = update_status_text(state, getattr(self.app, "update_latest", ""))
         return _build_art(self._scale, status)

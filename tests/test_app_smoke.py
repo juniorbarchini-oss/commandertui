@@ -1347,6 +1347,43 @@ async def test_places_change_login_resets_and_reconnects(tmp_path, monkeypatch):
         assert netlocations.is_anonymous("smb://nas/HD1/")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 140])  # single- and double-size title
+async def test_boot_reveal_finishes_quickly_at_any_size(tmp_path, width):
+    import time
+
+    from commandertui.app import CommanderApp
+    from commandertui.boot import REVEAL_SECONDS
+
+    app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    start = time.monotonic()
+    async with app.run_test(size=(width, 40)) as pilot:
+        screen = app.screen
+        while not screen._done and time.monotonic() - start < 10:
+            await pilot.pause(0.05)
+        assert screen._done
+        assert time.monotonic() - start < REVEAL_SECONDS + 1.5
+
+
+@pytest.mark.asyncio
+async def test_boot_stops_waiting_for_a_slow_update_check(tmp_path, monkeypatch):
+    import time
+
+    from commandertui import boot
+    from commandertui.app import CommanderApp
+
+    monkeypatch.setattr(boot, "UPDATE_WAIT_SECONDS", 0.5)
+    app = CommanderApp(str(tmp_path), str(tmp_path), check_updates=False)
+    start = time.monotonic()
+    async with app.run_test(size=(140, 40)) as pilot:
+        app.update_state = "pending"  # the network never answers
+        screen = app.screen
+        while not screen._done and time.monotonic() - start < 10:
+            await pilot.pause(0.05)
+        assert screen._done
+        assert "LATER" in str(screen.query_one("#boot-text").render())
+
+
 async def test_boot_hint_is_centered_under_the_art(tmp_path):
     from commandertui.app import CommanderApp
 
