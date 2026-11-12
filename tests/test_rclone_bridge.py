@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import shutil
+
 import pytest
 from unittest.mock import patch
 
@@ -23,6 +25,16 @@ from commandertui.rclone_bridge import (
     resolve_rclone_endpoint,
 )
 from commandertui.transfer import ConflictPolicy, build_transfer_plan, execute_transfer_plan
+
+# These run the real rclone binary against local folders (a local path works
+# as an rclone remote); skip where rclone is not installed.
+needs_rclone = pytest.mark.skipif(shutil.which("rclone") is None, reason="rclone not installed")
+
+
+@pytest.fixture
+def rclone_present(monkeypatch):
+    """Logic-only tests: pretend rclone is installed (no binary is run)."""
+    monkeypatch.setattr("commandertui.rclone_bridge.rclone_available", lambda: True)
 
 
 def test_detect_rclone_mounts_parses_proc_mounts(tmp_path: Path) -> None:
@@ -64,6 +76,7 @@ def test_resolve_rclone_endpoint_matches_root_and_subpaths() -> None:
     assert local_spec == "/mnt/SATA_6TB/data"
 
 
+@pytest.mark.usefixtures("rclone_present")
 def test_is_rclone_transfer_identifies_cloud_endpoints() -> None:
     """is_rclone_transfer returns True when either src or dst is on a fuse.rclone mount."""
     mounts = [RcloneMount(mountpoint="/mnt/gdrive", remote="gdrive:")]
@@ -73,6 +86,7 @@ def test_is_rclone_transfer_identifies_cloud_endpoints() -> None:
     assert is_rclone_transfer("/tmp/a", "/tmp/b", mounts) is False
 
 
+@needs_rclone
 def test_copy_with_rclone_directory_and_progress(tmp_path: Path) -> None:
     """copy_with_rclone copies a directory tree using rclone and emits progress."""
     fake_cloud_backing = tmp_path / "cloud_backing"
@@ -111,6 +125,7 @@ def test_copy_with_rclone_directory_and_progress(tmp_path: Path) -> None:
     assert len(progress_events) > 0
 
 
+@needs_rclone
 def test_move_with_rclone_local_to_remote_trashes_source(tmp_path: Path) -> None:
     """Moving a local folder to an rclone mount copies via rclone and trashes the local source."""
     fake_cloud_backing = tmp_path / "cloud_backing"
@@ -142,6 +157,7 @@ def test_move_with_rclone_local_to_remote_trashes_source(tmp_path: Path) -> None
     assert trashed == [str(local_src)]
 
 
+@needs_rclone
 def test_batch_transfer_files_with_rclone_copies_multiple_files(tmp_path: Path) -> None:
     """batch_transfer_files_with_rclone transfers multiple relative files in a single rclone run."""
     fake_cloud_backing = tmp_path / "cloud_backing"
@@ -255,6 +271,7 @@ def test_rclone_cancellation_returns_cancelled_result(tmp_path: Path) -> None:
     assert res.cancelled is True
 
 
+@needs_rclone
 def test_rclone_progress_compatible_with_transfer_status(tmp_path: Path) -> None:
     """Progress callbacks emitted by copy_with_rclone keep TransferStatus monotonic and accurate."""
     from commandertui.executor import TransferStatus
@@ -400,6 +417,7 @@ def test_symlinks_in_local_dir_bypasses_rclone(tmp_path: Path) -> None:
     assert (dst_dir / "src_tree" / "link.txt").is_symlink()
 
 
+@pytest.mark.usefixtures("rclone_present")
 def test_batch_transfer_reports_partial_failures_accurately(tmp_path: Path) -> None:
     """When a batch has failing items, failed items are recorded and successful items are counted."""
     from commandertui.rclone_bridge import RcloneResult
