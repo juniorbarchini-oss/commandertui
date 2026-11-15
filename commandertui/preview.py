@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import codecs
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
@@ -330,6 +331,39 @@ def is_image_engine_available() -> bool:
     )
 
 
+_INSTALL_KIND_ENV = "COMMANDERTUI_INSTALL_KIND"
+_install_kind: str | None = None
+
+_ARCH_ENGINE_HINTS = {
+    "images": 'install the AUR package python-textual-image, e.g. "yay -S python-textual-image"',
+    "pdf-render": "needs the AUR package python-pypdfium2, which may not be installable on Arch right now",
+    "documents": "install with: sudo pacman -S python-pypdf python-docx python-openpyxl",
+}
+
+
+def install_kind() -> str:
+    """How this copy was installed ("pacman", "pipx", "pip" or "source"); cached per process."""
+    global _install_kind
+    if _install_kind is None:
+        kind = os.environ.get(_INSTALL_KIND_ENV)
+        if not kind:
+            try:
+                from . import updater
+
+                kind = updater.detect_install()
+            except Exception:
+                kind = "pip"
+        _install_kind = kind
+    return _install_kind
+
+
+def optional_engine_hint(extra: str) -> str:
+    """How to get a missing optional preview engine, worded for the way the app was installed."""
+    if install_kind() == "pacman" and extra in _ARCH_ENGINE_HINTS:
+        return _ARCH_ENGINE_HINTS[extra]
+    return f'install with: pip install "commandertui[{extra}]"'
+
+
 def prepare_image_terminal() -> None:
     """Probe terminal image capabilities before Textual takes over stdin.
 
@@ -465,7 +499,7 @@ def _classify_by_extension(path: str) -> tuple[str, str | None]:
         return "audio", f"Audio ({ext.lstrip('.').upper()})"
     if ext in ARCHIVE_EXTS or lower_name.endswith((".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst")):
         return "archive", "Archive"
-    if ext in TEXT_EXTS or lower_name in TEXT_FILENAMES:
+    if ext in TEXT_EXTS or lower_name in TEXT_FILENAMES or (not ext and lower_name in TEXT_EXTS):
         return "text", "Text file"
     return "unknown", "File"
 
@@ -619,13 +653,17 @@ def _read_stream_bounded(
                     pos = chunk.find(b"\n", pos + 1)
                     if pos == -1:
                         break
+                rest = b""
                 if pos != -1:
                     chunks.append(chunk[: pos + 1])
                     total += pos + 1
+                    rest = chunk[pos + 1 :]
                 else:
                     chunks.append(chunk)
                     total += len(chunk)
-                truncated = f"Truncated at {line_limit:,} lines"
+                # Only a truncation when something is left after the last kept line.
+                if rest or fh.read(1):
+                    truncated = f"Truncated at {line_limit:,} lines"
                 return False
             lines += chunk_lines
 
@@ -684,7 +722,9 @@ def _looks_binary(sample: bytes) -> bool:
     return (non_text / len(sample)) > 0.30
 
 
-def _decode_text(raw: bytes) -> tuple[str, str]:
+def _decode_text(raw: bytes, *, truncated: bool = False) -> tuple[str, str]:
+    """Decode preview bytes. `truncated` means the read stopped at a byte limit, so the
+    last UTF-8 character may be cut in half; that must not demote the whole text to cp1252."""
     if raw.startswith(b"\xef\xbb\xbf"):
         return raw[3:].decode("utf-8", errors="replace"), "utf-8-sig"
     if raw.startswith(b"\xff\xfe"):
@@ -692,6 +732,9 @@ def _decode_text(raw: bytes) -> tuple[str, str]:
     if raw.startswith(b"\xfe\xff"):
         return raw[2:].decode("utf-16-be", errors="replace"), "utf-16-be"
     try:
+        if truncated:
+            # Strict on invalid bytes, but an incomplete trailing sequence is simply dropped.
+            return codecs.getincrementaldecoder("utf-8")().decode(raw, final=False), "utf-8"
         return raw.decode("utf-8"), "utf-8"
     except UnicodeDecodeError:
         return raw.decode("cp1252", errors="replace"), "cp1252 (lossy)"
@@ -801,7 +844,7 @@ def _load_image_preview(
             metadata=meta,
             pil_image=None,
             image_engine_available=False,
-            note='Optional image preview engine not installed (install with: pip install "commandertui[images]").',
+            note=f"Optional image preview engine not installed ({optional_engine_hint('images')}).",
         )
 
     try:
@@ -868,7 +911,7 @@ def _load_image_preview(
             metadata=meta,
             pil_image=None,
             image_engine_available=False,
-            note='Optional image preview engine not installed (install with: pip install "commandertui[images]").',
+            note=f"Optional image preview engine not installed ({optional_engine_hint('images')}).",
         )
 
     try:
@@ -1039,7 +1082,7 @@ def load_preview(
             meta,
             target_stat,
             cancel,
-            delimiter="\t" if category == "tsv" else ",",
+            delimiter="\t" if category == "tsv" else None,
         )
 
     # For text, markdown, or unknown files: open once, sniff first chunk, then continue streaming
@@ -1152,7 +1195,7 @@ def load_preview(
             error=truncated,
         )
 
-    decoded, encoding = _decode_text(raw)
+    decoded, encoding = _decode_text(raw, truncated=truncated is not None or target_stat.st_size > len(raw))
     sanitized = sanitize_terminal_text(decoded)
     kind = PreviewKind.MARKDOWN if category == "markdown" else PreviewKind.TEXT
 
@@ -1182,7 +1225,7 @@ def _minimal_fallback_metadata(abs_path: str) -> FileMetadata:
         is_symlink=False,
         symlink_target=None,
         file_type="File",
-        mime_type=None,
+        mime_type=sanitize_terminal_text(mimetypes.guess_type(abs_path)[0] or "application/octet-stream"),
     )
 
 
@@ -1300,6 +1343,9 @@ def load_preview_isolated(
             base_timeout = image_timeout
         elif category in ("pdf", "docx", "xlsx", "csv", "tsv"):
             base_timeout = preview_docs.DOC_PREVIEW_TIMEOUT
+        elif category == "unknown":
+            # Content sniffing may still route an extension-less file to the image or PDF loader.
+            base_timeout = max(text_timeout, image_timeout, preview_docs.DOC_PREVIEW_TIMEOUT)
         else:
             base_timeout = text_timeout
         effective_wall_timeout = max(0.2, base_timeout + ISOLATED_PREVIEW_GRACE_SECONDS)
@@ -1307,6 +1353,11 @@ def load_preview_isolated(
         effective_wall_timeout = max(0.01, wall_timeout)
 
     env = os.environ.copy()
+    env[_INSTALL_KIND_ENV] = install_kind()
+    # The worker must import this same package even when the app was started from another
+    # directory (e.g. `python /path/to/main.py`).
+    pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (pkg_parent, env.get("PYTHONPATH", "")) if p)
     if not is_image_engine_available():
         env["COMMANDERTUI_DISABLE_IMAGES"] = "1"
     if (

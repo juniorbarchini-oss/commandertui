@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 
@@ -32,6 +33,27 @@ from .widgets import SPINNER_FRAMES, ActionBar, FnButton
 IMAGE_MODES = settings.IMAGE_MODES
 # TGP diacritic index table in textual_image has 297 entries; cap safely below it on both axes.
 MAX_IMAGE_RENDER_CELLS = 256
+# Textual's Markdown widget mounts one widget per block (paragraph, list item, table row) on the
+# UI thread: a few thousand blocks freeze the app for tens of seconds. Above this estimate the
+# file is shown as source text instead (about 2 seconds of rendering at the limit).
+MAX_MARKDOWN_RENDER_BLOCKS = 300
+_MD_CHUNK_RE = re.compile(r"\n[ \t]*\n")
+_MD_ITEM_RE = re.compile(r"(?m)^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\S|^[ \t]*\|")
+
+
+def estimate_markdown_blocks(text: str) -> int:
+    """Cheap estimate of how many widgets Textual's Markdown would mount for `text`."""
+    chunks = sum(1 for chunk in _MD_CHUNK_RE.split(text) if chunk.strip())
+    return chunks + len(_MD_ITEM_RE.findall(text))
+
+
+def _is_paged(result: PreviewResult | None) -> bool:
+    """True for results the user navigates with [ ] (PDF pages, workbook sheets)."""
+    if result is None:
+        return False
+    if result.kind == PreviewKind.PDF:
+        return result.page_count > 0
+    return result.kind == PreviewKind.TABLE and bool(result.sheet_names) and len(result.sheet_names) > 1
 
 
 def _bound_console_options(options: ConsoleOptions, max_cells: int) -> ConsoleOptions:
@@ -290,6 +312,7 @@ class PreviewScreen(Screen):
         self.result: PreviewResult | None = None
         self.soft_wrap = True
         self.markdown_source = False
+        self.markdown_too_large = False
         self.image_mode_index = IMAGE_MODES.index(settings.default_image_mode())
         self.page_index = 0
         self.sheet_index = 0
@@ -390,7 +413,30 @@ class PreviewScreen(Screen):
             return
         self._loading = False
         self._stop_spinner()
+        previous = self.result
+        if _is_paged(previous) and result.kind in (PreviewKind.ERROR, PreviewKind.METADATA):
+            # A page, sheet or visual-mode switch that failed must not strand the viewer on an
+            # error view without navigation: keep what was on screen and say what went wrong.
+            if previous.kind == PreviewKind.PDF:
+                what = f"page {self.page_index + 1}"
+                if self.pdf_visual and not previous.pdf_visual_mode:
+                    what += " (visual)"
+            else:
+                what = f"sheet {self.sheet_index + 1}"
+            self.page_index = previous.page_index
+            self.sheet_index = previous.sheet_index
+            self.pdf_visual = previous.pdf_visual_mode
+            reason = sanitize_terminal_text(result.error or result.note or "preview failed")
+            notice = self.query_one("#preview-notice", Static)
+            notice.update(f"Could not load {what}: {reason}")
+            notice.display = True
+            self._sync_bar()
+            return
         self.result = result
+        if result.kind == PreviewKind.MARKDOWN:
+            self.markdown_too_large = estimate_markdown_blocks(result.text or "") > MAX_MARKDOWN_RENDER_BLOCKS
+            if self.markdown_too_large:
+                self.markdown_source = True
         self.page_index = result.page_index
         self.sheet_index = result.sheet_index
         if result.kind == PreviewKind.PDF:
@@ -486,11 +532,13 @@ class PreviewScreen(Screen):
         pager_noun = "Sheet" if is_xlsx_multi else "Page"
         bar.update_controls(
             show_wrap=is_text or (is_md and self.markdown_source) or (is_pdf and not is_pdf_visual),
-            show_markdown=is_md,
+            show_markdown=is_md and not self.markdown_too_large,
             markdown_source=self.markdown_source,
             show_image_mode=is_img or is_pdf_visual,
             image_mode=IMAGE_MODES[self.image_mode_index],
-            show_pdf_visual=is_pdf and res.page_count > 0,
+            show_pdf_visual=is_pdf
+            and res.page_count > 0
+            and (res.pdf_visual_available or res.pdf_visual_mode),
             pdf_visual_mode=bool(res and res.pdf_visual_mode),
             show_pager=show_pager,
             can_prev=can_prev,
@@ -532,6 +580,8 @@ class PreviewScreen(Screen):
 
         notice_widget = self.query_one("#preview-notice", Static)
         notices = [msg for msg in (result.truncated_reason, result.note, result.error) if msg]
+        if result.kind == PreviewKind.MARKDOWN and self.markdown_too_large:
+            notices.append("Large Markdown file: showing source text (rendering it would freeze the viewer)")
         is_rendered_visual = (
             result.pil_image is not None
             and result.image_engine_available
@@ -717,7 +767,7 @@ class PreviewScreen(Screen):
                     ta.soft_wrap = self.soft_wrap
 
     async def action_toggle_markdown_source(self) -> None:
-        if self.result is None or self.result.kind != PreviewKind.MARKDOWN:
+        if self.result is None or self.result.kind != PreviewKind.MARKDOWN or self.markdown_too_large:
             return
         self.markdown_source = not self.markdown_source
         await self._render_result_safely()
@@ -743,7 +793,7 @@ class PreviewScreen(Screen):
         if not self.pdf_visual and not self.result.pdf_visual_available:
             notice = self.query_one("#preview-notice", Static)
             notice.update(
-                'Optional visual PDF renderer not installed (install with: pip install "commandertui[pdf-render,images]").'
+                f"Optional visual PDF renderer not installed ({preview.optional_engine_hint('pdf-render')})."
             )
             notice.display = True
             return
