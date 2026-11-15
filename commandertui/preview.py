@@ -12,6 +12,7 @@ import io
 import json
 import mimetypes
 import os
+import shutil
 import signal
 import stat
 import struct
@@ -279,6 +280,45 @@ def toggle_preview(path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Linux: open with the desktop's default application
+# ---------------------------------------------------------------------------
+
+
+def system_opener() -> str | None:
+    """`xdg-open` when this is a Linux desktop session that can show another window, else None.
+
+    Without a display (SSH, a server console) xdg-open could fall back to a text-mode program
+    that would fight the TUI for the terminal, so it is not offered there.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+        return None
+    return shutil.which("xdg-open")
+
+
+def open_with_system_app(path: str) -> str | None:
+    """Hand `path` to the desktop's default application. Returns an error text, or None when started."""
+    opener = system_opener()
+    if opener is None:
+        return "No desktop session or xdg-open found; cannot open the system viewer here."
+    abs_path = os.path.abspath(path)
+    if not os.path.isfile(abs_path):
+        return "File not found."
+    try:
+        subprocess.Popen(
+            [opener, abs_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        return f"Could not start the system viewer: {sanitize_terminal_text(str(exc))}"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Sanitization, image probing, and safe background loading
 # ---------------------------------------------------------------------------
 
@@ -336,7 +376,10 @@ _install_kind: str | None = None
 
 _ARCH_ENGINE_HINTS = {
     "images": 'install the AUR package python-textual-image, e.g. "yay -S python-textual-image"',
-    "pdf-render": "needs the AUR package python-pypdfium2, which may not be installable on Arch right now",
+    "pdf-render": (
+        'install poppler ("sudo pacman -S poppler") and the AUR package python-textual-image '
+        '("yay -S python-textual-image")'
+    ),
     "documents": "install with: sudo pacman -S python-pypdf python-docx python-openpyxl",
 }
 
