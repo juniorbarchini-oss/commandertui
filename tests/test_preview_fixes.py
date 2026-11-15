@@ -117,7 +117,7 @@ def test_optional_engine_hint_matches_the_install_kind(monkeypatch):
     assert preview.optional_engine_hint("images") == 'install with: pip install "commandertui[images]"'
     monkeypatch.setattr(preview, "_install_kind", "pacman")
     assert "yay -S python-textual-image" in preview.optional_engine_hint("images")
-    assert "python-pypdfium2" in preview.optional_engine_hint("pdf-render")
+    assert "pacman -S poppler" in preview.optional_engine_hint("pdf-render")
     assert "pip install" not in preview.optional_engine_hint("pdf-render")
 
 
@@ -293,3 +293,125 @@ async def test_pdf_visual_button_is_hidden_without_a_renderer(tmp_path):
         actions = _visible_actions(screen)
         assert "toggle_pdf_visual" not in actions
         assert "next_item" in actions
+
+
+# ------------------------------------------------------------------ PDF pages through poppler
+
+
+def _blank_pdf(path, pages: int = 2) -> None:
+    import pypdf
+
+    writer = pypdf.PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=200, height=300)
+    with open(path, "wb") as fh:
+        writer.write(fh)
+
+
+needs_poppler = pytest.mark.skipif(
+    preview_docs.poppler_pdftoppm() is None
+    or not preview.is_image_engine_available()
+    or not preview_docs.is_pdf_text_engine_available(),
+    reason="poppler (pdftoppm), pypdf and the image engine are needed",
+)
+
+
+@needs_poppler
+def test_pdf_page_renders_with_poppler_when_pdfium_is_missing(tmp_path):
+    path = tmp_path / "scan.pdf"
+    _blank_pdf(path)
+    with patch.object(preview_docs, "is_pdfium_available", return_value=False):
+        assert preview_docs.is_pdf_render_engine_available()
+        res = preview.load_preview(str(path), pdf_visual=True, page_index=1)
+    assert res.kind == PreviewKind.PDF and res.pdf_visual_mode
+    assert res.page_index == 1 and res.page_count == 2
+    assert res.pil_image is not None
+    assert max(res.pil_image.size) == preview.MAX_IMAGE_DIM
+    assert res.pil_image.width < res.pil_image.height
+
+
+@needs_poppler
+def test_poppler_takes_over_when_pdfium_is_installed_but_broken(tmp_path):
+    path = tmp_path / "scan.pdf"
+    _blank_pdf(path, pages=1)
+    with (
+        patch.object(preview_docs, "is_pdfium_available", return_value=True),
+        patch.object(preview_docs, "_render_pdf_page_image", side_effect=OSError("libpdfium.so missing")),
+    ):
+        res = preview.load_preview(str(path), pdf_visual=True)
+    assert res.pdf_visual_mode and res.pil_image is not None
+
+
+def test_no_page_renderer_without_pdfium_and_poppler(monkeypatch):
+    monkeypatch.setenv("COMMANDERTUI_DISABLE_POPPLER", "1")
+    with patch.object(preview_docs, "is_pdfium_available", return_value=False):
+        assert preview_docs.poppler_pdftoppm() is None
+        assert not preview_docs.is_pdf_render_engine_available()
+
+
+@needs_poppler
+def test_poppler_failure_is_reported_not_raised(tmp_path):
+    path = tmp_path / "broken.pdf"
+    path.write_bytes(b"%PDF-1.4\nnot really a pdf\n")
+    with patch.object(preview_docs, "_pdf_page_count", return_value=1):
+        img, _, _, _, err = preview_docs._render_pdf_page_poppler(
+            path.read_bytes(), str(path), 0, pixel_limit=10**7, max_dim=400, timeout=10
+        )
+    assert img is None and err.startswith("Could not render PDF page")
+
+
+# ------------------------------------------------------------------ open with the system viewer
+
+
+def test_system_opener_needs_linux_a_display_and_xdg_open(monkeypatch):
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr(preview.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert preview.system_opener() is None
+    assert "cannot open" in preview.open_with_system_app("/etc/hostname")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-1")
+    assert preview.system_opener() == "/usr/bin/xdg-open"
+    monkeypatch.setattr(preview.shutil, "which", lambda name: None)
+    assert preview.system_opener() is None
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert preview.system_opener() is None
+
+
+def test_open_with_system_app_starts_xdg_open_detached(tmp_path, monkeypatch):
+    target = tmp_path / "doc.pdf"
+    target.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(preview, "system_opener", lambda: "/usr/bin/xdg-open")
+    with patch.object(preview.subprocess, "Popen") as popen:
+        assert preview.open_with_system_app(str(target)) is None
+    args, kwargs = popen.call_args
+    assert args[0] == ["/usr/bin/xdg-open", str(target)]
+    assert kwargs["start_new_session"] is True
+    assert preview.open_with_system_app(str(tmp_path / "missing.pdf")) == "File not found."
+
+
+async def test_viewer_o_key_opens_the_system_viewer_on_linux(tmp_path, monkeypatch):
+    (tmp_path / "a.txt").write_text("hola\n", encoding="utf-8")
+    monkeypatch.setattr(preview, "is_macos", lambda: False)
+    monkeypatch.setattr(preview, "system_opener", lambda: "/usr/bin/xdg-open")
+    app = _app(tmp_path)
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        screen = await _open_preview(pilot, app, "a.txt")
+        assert "quick_look" in _visible_actions(screen)
+        with patch.object(preview, "open_with_system_app", return_value=None) as opened:
+            await pilot.press("o")
+            await pilot.pause()
+        opened.assert_called_once_with(screen.path)
+        assert "Opened" in str(screen.query_one("#preview-notice", Static).content)
+
+
+async def test_viewer_hides_open_button_without_a_desktop(tmp_path, monkeypatch):
+    (tmp_path / "a.txt").write_text("hola\n", encoding="utf-8")
+    monkeypatch.setattr(preview, "is_macos", lambda: False)
+    monkeypatch.setattr(preview, "system_opener", lambda: None)
+    app = _app(tmp_path)
+    async with app.run_test(size=(140, 30)) as pilot:
+        await _skip_boot(pilot)
+        screen = await _open_preview(pilot, app, "a.txt")
+        assert "quick_look" not in _visible_actions(screen)

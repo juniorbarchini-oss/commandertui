@@ -218,7 +218,7 @@ class PreviewBar(ActionBar):
         ("[", "Prev", "prev_item"),
         ("]", "Next", "next_item"),
         ("s", "Sheet", "choose_sheet"),
-        ("o", "Quick Look", "quick_look"),
+        ("o", "Open", "quick_look"),
     ]
 
     def update_controls(
@@ -237,6 +237,7 @@ class PreviewBar(ActionBar):
         pager_noun: str = "Page",
         show_sheet_picker: bool = False,
         show_quick_look: bool = False,
+        quick_look_label: str = "Open",
     ) -> None:
         for btn in self.query(FnButton):
             action = getattr(btn, "action_name", "")
@@ -267,6 +268,7 @@ class PreviewBar(ActionBar):
                 btn.display = show_sheet_picker
             elif action == "quick_look":
                 btn.display = show_quick_look
+                btn.label = Text.assemble(("o", "bold"), f"\u00a0{quick_look_label}")
 
 
 def _format_metadata_lines(meta: FileMetadata, *, note: str | None = None, error: str | None = None) -> str:
@@ -303,7 +305,7 @@ class PreviewScreen(Screen):
         Binding("left_square_bracket", "prev_item", "Previous page or sheet", priority=True),
         Binding("right_square_bracket", "next_item", "Next page or sheet", priority=True),
         Binding("s", "choose_sheet", "Select sheet", priority=True),
-        Binding("o", "quick_look", "Quick Look", priority=True),
+        Binding("o", "quick_look", "Open with system viewer", priority=True),
     ]
 
     def __init__(self, path: str) -> None:
@@ -545,7 +547,8 @@ class PreviewScreen(Screen):
             can_next=can_next,
             pager_noun=pager_noun,
             show_sheet_picker=is_xlsx_multi,
-            show_quick_look=preview.is_macos(),
+            show_quick_look=preview.is_macos() or preview.system_opener() is not None,
+            quick_look_label="Quick Look" if preview.is_macos() else "Open",
         )
 
     def _update_header(self, result: PreviewResult) -> None:
@@ -846,6 +849,11 @@ class PreviewScreen(Screen):
         self.app.push_screen(ChoiceScreen("Select worksheet:", names, initial=self.sheet_index), on_pick)
 
     def action_quick_look(self) -> None:
-        if not preview.is_macos():
+        """`o`: Quick Look on macOS, the desktop's default application on Linux."""
+        if preview.is_macos():
+            preview.toggle_preview(self.path)
             return
-        preview.toggle_preview(self.path)
+        error = preview.open_with_system_app(self.path)
+        notice = self.query_one("#preview-notice", Static)
+        notice.update(error or "Opened in the system's default application.")
+        notice.display = True
