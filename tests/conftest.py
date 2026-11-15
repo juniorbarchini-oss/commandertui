@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 
@@ -14,6 +16,18 @@ def no_real_update_check(monkeypatch, tmp_path, isolated_user_home):
 @pytest.fixture(autouse=True)
 def isolated_settings(monkeypatch, tmp_path, isolated_user_home):
     """Tests must never read or write the user's real settings file."""
+    for var in (
+        "HERDR_ENV",
+        "HERDR_PANE_ID",
+        "HERDR_SOCKET_PATH",
+        "HERDR_SESSION",
+        "HERDR_TAB_ID",
+        "HERDR_WORKSPACE_ID",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    if os.environ.get("TERM_PROGRAM", "").lower() == "herdr":
+        monkeypatch.delenv("TERM_PROGRAM", raising=False)
+
     from commandertui import settings
 
     monkeypatch.setattr(settings, "SETTINGS_FILE", str(tmp_path / "settings.json"))

@@ -11,7 +11,8 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Header
 
 from .compare_screen import CompareScreen
-from . import __version__, archive, editor, netlocations, preview, theme, updater
+from . import __version__, archive, editor, netlocations, preview, settings, theme, updater
+from .preview_screen import PreviewScreen
 from .modals import (
     ADD_NETWORK,
     CHANGE_LOGIN,
@@ -450,18 +451,16 @@ class MainScreen(Screen):
         panel.move_cursor_to(name)
 
     def action_preview_file(self) -> None:
-        if not preview.is_macos():
-            return
         panel = self._active_panel()
         name = panel.selected_name()
-        if not name or name == PARENT_MARK:
+        if not name or name == PARENT_MARK or panel.selected_is_dir():
             self.app.push_screen(MessageScreen("Preview works on files only"))
             return
         path = os.path.join(panel.path, name)
-        if os.path.isdir(path):
-            self.app.push_screen(MessageScreen("Preview works on files only"))
+        if preview.is_macos() and settings.load_preview_mode() == "quicklook":
+            preview.toggle_preview(path)
             return
-        preview.toggle_preview(path)
+        self.app.push_screen(PreviewScreen(path))
 
     def action_copy(self) -> None:
         self._run_marked_op(OpKind.COPY, "Copy")

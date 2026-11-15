@@ -334,6 +334,16 @@ class FilePanel(Vertical):
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         return row_key.value if row_key is not None else None
 
+    def selected_is_dir(self) -> bool:
+        """Return whether the highlighted entry is a directory from the cached listing."""
+        name = self.selected_name()
+        if name is None:
+            return False
+        for row_name, is_dir in self._rows:
+            if row_name == name:
+                return is_dir
+        return False
+
     def enter_selected(self) -> None:
         name = self.selected_name()
         if name is None:
@@ -397,7 +407,7 @@ class ActionBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         for i, (key, label, action) in enumerate(self.KEYS):
-            button = FnButton(f"[b]{key}[/b]\u00a0{label}", id=f"{self.PREFIX}-{i}")
+            button = FnButton(Text.assemble((key, "bold"), f"\u00a0{label}"), id=f"{self.PREFIX}-{i}")
             button.action_name = action
             yield button
 
@@ -420,7 +430,7 @@ class MainTopBar(ActionBar):
         ("r", "Refresh", "refresh_both"),
         ("h", "Hidden", "toggle_hidden"),
         ("t", "Theme", "pick_theme"),
-        ("i", "Size", "show_size"),
+        ("u", "Update", "update_app"),
         ("q", "Quit", "app.quit"),
     ]
 
@@ -438,15 +448,13 @@ class FunctionBar(ActionBar):
         ("F8", "Delete", "delete"),
         ("z", "Tar.gz", "create_archive"),
         ("x", "Extract", "extract_archive"),
-        ("u", "Updates", "update_app"),
+        ("i", "Size", "show_size"),
+        ("v", "Preview", "preview_file"),
     ]
 
     @classmethod
     def get_keys(cls) -> list[tuple[str, str, str]]:
-        keys = list(cls.KEYS)
-        if sys.platform == "darwin":
-            keys.append(("v", "Preview", "preview_file"))
-        return keys
+        return list(cls.KEYS)
 
     @classmethod
     def needed_width(cls) -> int:
