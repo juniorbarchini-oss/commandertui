@@ -22,6 +22,7 @@ from .preview import (
     _read_bounded,
     format_size_bytes,
     is_image_engine_available,
+    optional_engine_hint,
     sanitize_terminal_text,
 )
 
@@ -275,13 +276,33 @@ def _read_bounded_doc(
 # ---------------------------------------------------------------------------
 
 
+_CSV_DELIMITER_CANDIDATES = (",", ";", "\t", "|")
+
+
+def _detect_csv_delimiter(text: str) -> str:
+    """Pick the delimiter that splits the first lines into the most columns (comma on ties).
+
+    Spreadsheet exports in many locales (Spanish among them) use ';' in `.csv` files.
+    """
+    sample = [line for line in text.splitlines()[:20] if line.strip()][:10]
+    best, best_cols = ",", 1
+    for cand in _CSV_DELIMITER_CANDIDATES:
+        try:
+            cols = min((len(row) for row in csv.reader(sample, delimiter=cand)), default=1)
+        except csv.Error:
+            continue
+        if cols > best_cols:
+            best, best_cols = cand, cols
+    return best
+
+
 def load_csv_preview(
     abs_path: str,
     meta: FileMetadata,
     st: os.stat_result,
     cancel: Callable[[], bool] | None,
     *,
-    delimiter: str = ",",
+    delimiter: str | None = ",",
     byte_limit: int = CSV_READ_BYTES,
     max_rows: int = MAX_TABLE_ROWS,
     max_cols: int = MAX_TABLE_COLS,
@@ -326,10 +347,12 @@ def load_csv_preview(
             note="Binary content detected; showing metadata only.",
         )
 
-    text, encoding = _decode_text(raw)
+    text, encoding = _decode_text(raw, truncated=truncated is not None or st.st_size > len(raw))
     if truncated is not None and "\n" in text:
         # Drop partial last line when truncated by bytes
         text = text.rsplit("\n", 1)[0]
+    if delimiter is None:
+        delimiter = _detect_csv_delimiter(text)
 
     max_cells = max(1, max_cells)
     parsed_rows: list[list[str]] = []
@@ -617,7 +640,7 @@ def _extract_pdf_text_result(
                 path=abs_path,
                 metadata=meta,
                 pdf_visual_available=False,
-                note='Optional PDF preview engine not installed (install with: pip install "commandertui[documents]").',
+                note=f"Optional PDF preview engine not installed ({optional_engine_hint('documents')}).",
             )
         pdfium_text, clamped, page_count, err = _extract_pdf_text_pdfium(raw, page_index)
         if err is not None or pdfium_text is None:
@@ -648,7 +671,8 @@ def _extract_pdf_text_result(
             notes.append("No selectable text found on this page (press g for visual page preview).")
         else:
             notes.append(
-                'No selectable text found on this page (install "commandertui[pdf-render]" for visual page preview).'
+                "No selectable text found on this page; visual page preview is unavailable "
+                f"({optional_engine_hint('pdf-render')})."
             )
 
     return PreviewResult(
@@ -694,7 +718,7 @@ def load_pdf_preview(
             metadata=meta,
             pdf_visual_available=False,
             image_engine_available=False,
-            note='Optional PDF preview engine not installed (install with: pip install "commandertui[documents]").',
+            note=f"Optional PDF preview engine not installed ({optional_engine_hint('documents')}).",
         )
 
     raw, err_res = _read_bounded_doc(
@@ -720,7 +744,7 @@ def load_pdf_preview(
                 max_chars=max_chars,
                 text_engine_ok=text_engine_ok,
                 visual_engine_ok=False,
-                extra_note='Optional visual PDF renderer not installed (install with: pip install "commandertui[pdf-render]").',
+                extra_note=f"Optional visual PDF renderer not installed ({optional_engine_hint('pdf-render')}).",
             )
         pil_img, clamped, page_count, dims, render_err = _render_pdf_page_image(
             raw, page_index, pixel_limit=pixel_limit, max_dim=max_dim
@@ -830,7 +854,7 @@ def load_docx_preview(
             kind=PreviewKind.METADATA,
             path=abs_path,
             metadata=meta,
-            note='Optional DOCX preview engine not installed (install with: pip install "commandertui[documents]").',
+            note=f"Optional DOCX preview engine not installed ({optional_engine_hint('documents')}).",
         )
 
     raw, err_res = _read_bounded_doc(
@@ -863,7 +887,7 @@ def load_docx_preview(
             kind=PreviewKind.METADATA,
             path=abs_path,
             metadata=meta,
-            note='Optional DOCX preview engine not installed (install with: pip install "commandertui[documents]").',
+            note=f"Optional DOCX preview engine not installed ({optional_engine_hint('documents')}).",
         )
 
     try:
@@ -992,7 +1016,7 @@ def load_xlsx_preview(
             kind=PreviewKind.METADATA,
             path=abs_path,
             metadata=meta,
-            note='Optional XLSX preview engine not installed (install with: pip install "commandertui[documents]").',
+            note=f"Optional XLSX preview engine not installed ({optional_engine_hint('documents')}).",
         )
 
     raw, err_res = _read_bounded_doc(
@@ -1021,11 +1045,13 @@ def load_xlsx_preview(
             kind=PreviewKind.METADATA,
             path=abs_path,
             metadata=meta,
-            note='Optional XLSX preview engine not installed (install with: pip install "commandertui[documents]").',
+            note=f"Optional XLSX preview engine not installed ({optional_engine_hint('documents')}).",
         )
 
     wb_vals = None
     wb_formulas = None
+    sheet_names: list[str] = []
+    clamped_sheet = 0
     try:
         wb_vals = openpyxl.load_workbook(
             io.BytesIO(raw), read_only=True, data_only=True, keep_vba=False, keep_links=False
@@ -1042,6 +1068,18 @@ def load_xlsx_preview(
         clamped_sheet = max(0, min(sheet_index, len(wb_vals.sheetnames) - 1))
         target_name = wb_vals.sheetnames[clamped_sheet]
         ws_vals = wb_vals[target_name]
+        if not hasattr(ws_vals, "iter_rows"):
+            return PreviewResult(
+                kind=PreviewKind.TABLE,
+                path=abs_path,
+                metadata=meta,
+                table_headers=["(chart)"],
+                table_rows=[],
+                sheet_names=sheet_names,
+                sheet_index=clamped_sheet,
+                encoding="utf-8",
+                note=f'Sheet "{sheet_names[clamped_sheet]}" is a chart sheet; it has no cells to show.',
+            )
 
         max_cells = max(1, max_cells)
         rows_raw: list[list[Any]] = []
@@ -1153,6 +1191,21 @@ def load_xlsx_preview(
             note=note,
         )
     except Exception as exc:
+        if len(sheet_names) > 1:
+            return PreviewResult(
+                kind=PreviewKind.TABLE,
+                path=abs_path,
+                metadata=meta,
+                table_headers=["(unreadable)"],
+                table_rows=[],
+                sheet_names=sheet_names,
+                sheet_index=clamped_sheet,
+                encoding="utf-8",
+                note=(
+                    f'Could not read sheet "{sheet_names[clamped_sheet]}": '
+                    f"{sanitize_terminal_text(str(exc))}"
+                ),
+            )
         return PreviewResult(
             kind=PreviewKind.METADATA,
             path=abs_path,
