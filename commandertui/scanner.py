@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import fnmatch
 import os
 import stat
+from collections.abc import Callable
 
 from .models import EntryKind, FileEntry
 
@@ -113,3 +115,65 @@ def path_size(path: str) -> int:
         return os.path.getsize(path)
     except OSError:
         return 0
+
+
+FIND_LIMIT = 500
+
+
+def name_matcher(pattern: str) -> Callable[[str], bool]:
+    """Case-insensitive match on a file name: a glob when the pattern has wildcards
+    (`*.pdf`, `report-??.txt`), otherwise "contains this text"."""
+    needle = pattern.strip().lower()
+    if any(ch in needle for ch in "*?["):
+        return lambda name: fnmatch.fnmatchcase(name.lower(), needle)
+    return lambda name: needle in name.lower()
+
+
+def find_names(
+    root: str,
+    pattern: str,
+    cancelled: Callable[[], bool] = lambda: False,
+    on_found: Callable[[str], None] | None = None,
+    *,
+    show_hidden: bool = False,
+    limit: int = FIND_LIMIT,
+) -> tuple[list[str], bool]:
+    """Walk `root` looking for files and folders whose name matches `pattern`.
+
+    Returns (paths, truncated). Only reads directory listings; symlinked folders are
+    reported but not entered, so a link loop cannot trap the walk. Unreadable folders
+    are skipped. `cancelled` is checked for every directory and entry.
+    """
+    matches = name_matcher(pattern)
+    found: list[str] = []
+    if not pattern.strip():
+        return found, False
+    stack = [root]
+    while stack:
+        if cancelled():
+            return found, False
+        current = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                entries = sorted(it, key=lambda e: e.name.lower())
+        except OSError:
+            continue
+        subdirs: list[str] = []
+        for entry in entries:
+            if cancelled():
+                return found, False
+            if not show_hidden and entry.name.startswith("."):
+                continue
+            if matches(entry.name):
+                if len(found) >= limit:
+                    return found, True
+                found.append(entry.path)
+                if on_found is not None:
+                    on_found(entry.path)
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    subdirs.append(entry.path)
+            except OSError:
+                continue
+        stack.extend(reversed(subdirs))
+    return found, False

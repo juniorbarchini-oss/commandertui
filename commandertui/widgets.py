@@ -427,10 +427,10 @@ class MainTopBar(ActionBar):
         ("+", "Select", "select_menu"),
         ("c", "Compare", "show_compare"),
         ("p", "Places", "show_places"),
-        ("r", "Refresh", "refresh_both"),
         ("h", "Hidden", "toggle_hidden"),
         ("t", "Theme", "pick_theme"),
         ("u", "Update", "update_app"),
+        ("?", "Help", "help"),
         ("q", "Quit", "app.quit"),
     ]
 
