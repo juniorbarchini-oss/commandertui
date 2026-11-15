@@ -243,7 +243,7 @@ DataTable:blur > .datatable--cursor {
     color: $background;
 }
 
-CompareBar {
+CompareBar, PreviewBar {
     dock: bottom;
 }
 
@@ -269,7 +269,7 @@ CompareBar {
     width: 100%;
 }
 
-MainTopBar, FunctionBar, CompareBar {
+MainTopBar, FunctionBar, CompareBar, PreviewBar {
     height: 3;
     background: $background;
 }
@@ -312,5 +312,80 @@ FnButton:hover {
     background: $primary;
     color: $background;
     text-style: bold;
+}
+
+PreviewScreen #preview-header {
+    background: $primary;
+    color: $background;
+    text-style: bold;
+    padding: 0 1;
+    height: 1;
+}
+
+PreviewScreen #preview-notice {
+    background: $surface;
+    color: $warning;
+    padding: 0 1;
+    height: auto;
+}
+
+PreviewScreen #preview-body {
+    width: 1fr;
+    height: 1fr;
+    border: heavy $primary;
+    background: $background;
+}
+
+PreviewScreen #preview-loading {
+    padding: 1 2;
+    color: $accent;
+}
+
+PreviewScreen #preview-scroll {
+    width: 1fr;
+    height: 1fr;
+    background: $background;
+    color: $foreground;
+    scrollbar-color: $foreground 40%;
+    scrollbar-background: $background;
+}
+
+PreviewScreen #preview-text {
+    width: 1fr;
+    height: 1fr;
+    background: $background;
+    color: $foreground;
+    border: none;
+}
+
+PreviewScreen #preview-table {
+    width: 1fr;
+    height: 1fr;
+    background: $background;
+    color: $foreground;
+}
+
+PreviewScreen #preview-markdown {
+    padding: 1 2;
+    background: $background;
+    color: $foreground;
+}
+
+PreviewScreen #preview-image-center {
+    width: 1fr;
+    height: auto;
+    padding: 1 2;
+}
+
+PreviewScreen #preview-image {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+PreviewScreen #preview-meta {
+    padding: 1 2;
+    color: $foreground;
 }
 """
