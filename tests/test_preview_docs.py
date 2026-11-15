@@ -13,6 +13,13 @@ from commandertui.preview import PreviewKind
 from commandertui.preview_screen import PreviewScreen
 
 
+@pytest.fixture(autouse=True)
+def _pdfium_only(monkeypatch):
+    """These tests cover the PDFium renderer; the poppler fallback (which would rescue the
+    simulated PDFium failures on machines that have pdftoppm) is tested in test_preview_fixes.py."""
+    monkeypatch.setenv("COMMANDERTUI_DISABLE_POPPLER", "1")
+
+
 async def _skip_boot(pilot) -> None:
     await pilot.pause()
     for _ in range(4):

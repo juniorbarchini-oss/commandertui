@@ -8,6 +8,9 @@ import io
 import math
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from typing import Any, Callable
 import zipfile
 import zlib
@@ -57,11 +60,22 @@ def is_pdf_text_engine_available() -> bool:
     return importlib.util.find_spec("pypdf") is not None
 
 
+def is_pdfium_available() -> bool:
+    return importlib.util.find_spec("pypdfium2") is not None
+
+
+def poppler_pdftoppm() -> str | None:
+    """Path of poppler's `pdftoppm`, the fallback page rasterizer where PDFium is not packaged."""
+    if os.environ.get("COMMANDERTUI_DISABLE_POPPLER") == "1":
+        return None
+    return shutil.which("pdftoppm")
+
+
 def is_pdf_render_engine_available() -> bool:
-    """Return True if optional PDF rasterization (`pypdfium2`) and image engine are available."""
+    """Return True if a PDF page rasterizer (`pypdfium2` or poppler) and the image engine are available."""
     if os.environ.get("COMMANDERTUI_DISABLE_PDF_RENDER") == "1":
         return False
-    return importlib.util.find_spec("pypdfium2") is not None and is_image_engine_available()
+    return (is_pdfium_available() or poppler_pdftoppm() is not None) and is_image_engine_available()
 
 
 def is_docx_engine_available() -> bool:
@@ -570,6 +584,116 @@ def _render_pdf_page_image(
                     pass
 
 
+def _pdf_page_count(raw: bytes, abs_path: str, timeout: float) -> int:
+    """Number of pages, from pypdf when installed, otherwise from poppler's `pdfinfo`; 0 if unknown."""
+    if is_pdf_text_engine_available():
+        try:
+            import pypdf
+
+            return len(pypdf.PdfReader(io.BytesIO(raw), strict=False).pages)
+        except Exception:
+            pass
+    pdfinfo = shutil.which("pdfinfo")
+    if pdfinfo:
+        try:
+            out = subprocess.run(
+                [pdfinfo, abs_path], capture_output=True, stdin=subprocess.DEVNULL, timeout=max(0.1, timeout)
+            ).stdout
+            match = re.search(rb"(?m)^Pages:\s+(\d+)", out)
+            if match:
+                return int(match.group(1))
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+    return 0
+
+
+def _render_pdf_page_poppler(
+    raw: bytes,
+    abs_path: str,
+    page_index: int,
+    *,
+    pixel_limit: int,
+    max_dim: int,
+    timeout: float,
+) -> tuple[Any | None, int, int, tuple[int, int] | None, str | None]:
+    """Rasterize one page with poppler's `pdftoppm` (same return shape as `_render_pdf_page_image`).
+
+    The file is only read by pdftoppm, never executed; the preview worker's process group and
+    wall-clock limit also cover this child process.
+    """
+    exe = poppler_pdftoppm()
+    if exe is None:
+        return None, 0, 0, None, "pdftoppm is not installed."
+    page_count = _pdf_page_count(raw, abs_path, timeout)
+    if page_count <= 0:
+        return None, 0, 0, None, "Could not read the PDF page count."
+    clamped = max(0, min(page_index, page_count - 1))
+    try:
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory(prefix="commandertui-pdf-") as tmpdir:
+            prefix = os.path.join(tmpdir, "page")
+            page_no = str(clamped + 1)
+            proc = subprocess.run(
+                [exe, "-f", page_no, "-l", page_no, "-png", "-singlefile", "-scale-to", str(max_dim)]
+                + [abs_path, prefix],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=max(0.1, timeout),
+            )
+            png = prefix + ".png"
+            if proc.returncode != 0 or not os.path.isfile(png):
+                detail = proc.stderr.decode("utf-8", errors="replace").strip().splitlines()
+                reason = sanitize_terminal_text(detail[-1]) if detail else f"exit {proc.returncode}"
+                return None, clamped, page_count, None, f"Could not render PDF page: {reason}"
+            with PILImage.open(png) as opened:
+                if opened.width * opened.height > pixel_limit:
+                    return None, clamped, page_count, None, "Rendered PDF page exceeds the pixel limit."
+                pil_img = opened.convert("RGB")
+        if pil_img.width > max_dim or pil_img.height > max_dim:
+            pil_img.thumbnail((max_dim, max_dim))
+        pil_img.load()
+        return pil_img, clamped, page_count, pil_img.size, None
+    except subprocess.TimeoutExpired:
+        return None, clamped, page_count, None, "Could not render PDF page: pdftoppm timed out."
+    except Exception as exc:
+        return (
+            None,
+            clamped,
+            page_count,
+            None,
+            f"Could not render PDF page: {sanitize_terminal_text(str(exc))}",
+        )
+
+
+def _render_pdf_page(
+    raw: bytes,
+    abs_path: str,
+    page_index: int,
+    *,
+    pixel_limit: int,
+    max_dim: int,
+    timeout: float,
+) -> tuple[Any | None, int, int, tuple[int, int] | None, str | None]:
+    """Rasterize with PDFium when it works, otherwise with poppler."""
+    result: tuple[Any | None, int, int, tuple[int, int] | None, str | None] | None = None
+    if is_pdfium_available():
+        try:
+            result = _render_pdf_page_image(raw, page_index, pixel_limit=pixel_limit, max_dim=max_dim)
+        except Exception as exc:  # e.g. the module is installed but its native library fails to load
+            result = (None, 0, 0, None, f"Could not render PDF page: {sanitize_terminal_text(str(exc))}")
+    if (result is None or result[0] is None) and poppler_pdftoppm() is not None:
+        fallback = _render_pdf_page_poppler(
+            raw, abs_path, page_index, pixel_limit=pixel_limit, max_dim=max_dim, timeout=timeout
+        )
+        if fallback[0] is not None or result is None:
+            result = fallback
+    if result is None:
+        result = (None, 0, 0, None, "No PDF page renderer is installed.")
+    return result
+
+
 def _extract_pdf_text_result(
     raw: bytes,
     abs_path: str,
@@ -642,7 +766,10 @@ def _extract_pdf_text_result(
                 pdf_visual_available=False,
                 note=f"Optional PDF preview engine not installed ({optional_engine_hint('documents')}).",
             )
-        pdfium_text, clamped, page_count, err = _extract_pdf_text_pdfium(raw, page_index)
+        try:
+            pdfium_text, clamped, page_count, err = _extract_pdf_text_pdfium(raw, page_index)
+        except Exception as exc:  # pypdfium2 missing or its native library broken
+            pdfium_text, err = None, f"Could not extract PDF text: {sanitize_terminal_text(str(exc))}"
         if err is not None or pdfium_text is None:
             return PreviewResult(
                 kind=PreviewKind.METADATA,
@@ -746,8 +873,13 @@ def load_pdf_preview(
                 visual_engine_ok=False,
                 extra_note=f"Optional visual PDF renderer not installed ({optional_engine_hint('pdf-render')}).",
             )
-        pil_img, clamped, page_count, dims, render_err = _render_pdf_page_image(
-            raw, page_index, pixel_limit=pixel_limit, max_dim=max_dim
+        pil_img, clamped, page_count, dims, render_err = _render_pdf_page(
+            raw,
+            abs_path,
+            page_index,
+            pixel_limit=pixel_limit,
+            max_dim=max_dim,
+            timeout=deadline - time.monotonic(),
         )
         abort = _abort_result(abs_path, meta, deadline, timeout, cancel, kind_label="PDF")
         if abort is not None:
