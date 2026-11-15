@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.7.1** — on-demand file previews on Linux and macOS. MIT licensed.
+Status: **v1.7.2** — on-demand file previews on Linux and macOS, with preview fixes. MIT licensed.
 
 ---
 
