@@ -18,6 +18,8 @@ from .modals import (
     CHANGE_LOGIN,
     ChoiceScreen,
     FilterScreen,
+    FindScreen,
+    HelpScreen,
     InputScreen,
     MessageScreen,
     PlacesScreen,
@@ -79,6 +81,10 @@ class MainScreen(Screen):
         Binding("h", "toggle_hidden", "Hidden", priority=True),
         Binding("i", "show_size", "Size", priority=True),
         Binding("v", "preview_file", "Preview", priority=True),
+        Binding("g", "go_to_path", "Go to path", priority=True),
+        Binding("f", "find", "Find", priority=True),
+        Binding("question_mark", "help", "Help", priority=True),
+        Binding("f1", "help", "Help", priority=True),
         # "app.quit", not "quit": this binding lives on the Screen, and a bare
         # "quit" resolves against the Screen's own (nonexistent) action_quit
         # rather than bubbling to the App, so it silently did nothing.
@@ -157,6 +163,8 @@ class MainScreen(Screen):
         if panel.header_active:
             col_name = ["Name", "Size", "Modified"][panel.header_selected_index]
             panel.toggle_sort(col_name)
+        elif panel.selected_name() not in (None, PARENT_MARK) and not panel.selected_is_dir():
+            self.action_preview_file()  # Enter on a file opens it, like on a folder
         else:
             panel.enter_selected()
 
@@ -551,6 +559,55 @@ class MainScreen(Screen):
                 self._go_to(path)
 
         self.app.push_screen(PlacesScreen(self._active_panel().path), on_picked)
+
+    def action_go_to_path(self) -> None:
+        panel = self._active_panel()
+
+        def on_path(text: str | None) -> None:
+            if not text:
+                return
+            target = os.path.expanduser(os.path.expandvars(text))
+            if not os.path.isabs(target):
+                target = os.path.join(panel.path, target)
+            self._show_in_panel(os.path.normpath(target))
+
+        self.app.push_screen(InputScreen("Go to path:", initial=panel.path), on_path)
+
+    def _show_in_panel(self, target: str) -> None:
+        """Open `target` in the active pane: a folder is entered, a file is selected in its folder."""
+        if os.path.isdir(target):
+            self._go_to(target)
+            return
+        folder, name = os.path.split(target)
+        if not os.path.lexists(target) or not os.path.isdir(folder):
+            self.app.push_screen(MessageScreen(f"Path not found:\n{target}"))
+            return
+        panel = self._active_panel()
+        if name.startswith(".") and not panel.show_hidden:
+            self.action_toggle_hidden()
+        self._go_to(folder)
+        if panel.filter_text:
+            panel.set_filter("")  # same folder as before: the filter could be hiding the file
+        panel.move_cursor_to(name)
+
+    def action_find(self) -> None:
+        panel = self._active_panel()
+        root = panel.path
+
+        def on_pattern(pattern: str | None) -> None:
+            if pattern:
+                self.app.push_screen(FindScreen(root, pattern, panel.show_hidden), on_found)
+
+        def on_found(path: str | None) -> None:
+            if path:
+                self._show_in_panel(path)
+
+        self.app.push_screen(
+            InputScreen("Find by name in this folder and its subfolders (e.g. report, *.pdf):"), on_pattern
+        )
+
+    def action_help(self) -> None:
+        self.app.push_screen(HelpScreen())
 
     def _go_to(self, path: str) -> None:
         panel = self._active_panel()

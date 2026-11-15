@@ -130,8 +130,10 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | Key | Action |
 |---|---|
 | `Tab` | Switch active pane |
-| `↑`/`↓`, `Enter` | Navigate, open directory (or sort column when header is focused with `↑` beyond row 0) |
+| `↑`/`↓`, `Enter` | Navigate; `Enter` opens the directory or previews the file (or sorts the column when the header is focused with `↑` beyond row 0) |
 | `Backspace` | Go to parent directory |
+| `g` | Go to a path you type or paste (`~` and relative paths work; a file path selects the file in its folder) |
+| `f` | Find files and folders by name in the current folder and its subfolders (plain text or a pattern like `*.pdf`); runs in the background, `Esc` stops it, `Enter` jumps to the result (first 500 matches) |
 | `Space` | Mark/unmark item under cursor |
 | `F2` | Rename the item under the cursor (never overwrites an existing name) |
 | `F4` | Edit the file under the cursor with `$VISUAL` / `$EDITOR` (falls back to nano, vim or vi); CommanderTUI pauses and comes back when you close the editor |
@@ -151,6 +153,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `p` | Places: jump to a mounted drive (USB/SMB/rclone), saved bookmark or saved network location. Inside: `a` add a network location, `s` save the active pane's folder as a bookmark, `d` delete a saved one, `e` unmount a mounted SMB share, `l` change the login of a saved network location (forgets the session, then anonymous or another user) |
 | `c` | Compare: full recursive diff between the two panes' current folders, with size and date of both sides (and which is newer when a file changed) |
 | `r` | Refresh both panes |
+| `?` / `F1` | Help: every key on one page |
 | `q` | Quit |
 
 While a copy/move runs, the progress window shows two bars (current file
@@ -221,7 +224,7 @@ operations, total bytes) and requires `y` to confirm.
 ```
 commandertui/
 ├── models.py          # FileEntry, DiffEntry, OperationQueue, QueuedOp
-├── scanner.py          # os.scandir recursive tree walk
+├── scanner.py          # os.scandir recursive tree walk, find by name
 ├── diff.py             # pure comparison: left-only / right-only / modified / identical
 ├── plan.py              # diff -> OperationQueue (mirror / update / two-way)
 ├── sync.py               # atomic copy/move (streamed, tmp+replace), checksum verify
@@ -238,7 +241,7 @@ commandertui/
 ├── preview_screen.py         # full-screen file previewer (text, Markdown, images, PDF, tables)
 ├── boot.py                    # startup "modem" reveal animation
 ├── widgets.py                  # FilePanel: one pane's directory listing
-├── modals.py                    # Confirm / Places / Input / Size / Message screens
+├── modals.py                    # Confirm / Places / Input / Size / Message / Find / Help screens
 ├── progress_screen.py            # two-bar transfer progress + cancel
 ├── run_queue.py                   # confirm -> run queue in a worker thread
 ├── compare_screen.py              # full diff view + bulk/manual sync actions

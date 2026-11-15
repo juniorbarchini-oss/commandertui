@@ -127,7 +127,7 @@ ConfirmScreen #confirm-box.danger, ConflictScreen #conflict-box.danger {
     border: heavy $error;
 }
 
-ConfirmScreen Button, ConflictScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FilterScreen Button, UpdateScreen Button {
+ConfirmScreen Button, ConflictScreen Button, ProgressScreen Button, InputScreen Button, MessageScreen Button, SizeScreen Button, PlacesScreen Button, ChoiceScreen Button, FindScreen Button, HelpScreen Button, FilterScreen Button, UpdateScreen Button {
     background: $background;
     color: $foreground;
     border: tall $primary;
@@ -139,7 +139,7 @@ ConfirmScreen Button.danger, ConflictScreen Button.danger, ProgressScreen Button
     border: tall $error;
 }
 
-ConfirmScreen Button:focus, ConflictScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FilterScreen Button:focus, UpdateScreen Button:focus {
+ConfirmScreen Button:focus, ConflictScreen Button:focus, ProgressScreen Button:focus, InputScreen Button:focus, MessageScreen Button:focus, SizeScreen Button:focus, PlacesScreen Button:focus, ChoiceScreen Button:focus, FindScreen Button:focus, HelpScreen Button:focus, FilterScreen Button:focus, UpdateScreen Button:focus {
     background: $primary;
     color: $background;
     text-style: bold;
@@ -150,7 +150,7 @@ ConfirmScreen Button.danger:focus, ConflictScreen Button.danger:focus, ProgressS
     color: $background;
 }
 
-MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box, FilterScreen #filter-box, UpdateScreen #update-box {
+MessageScreen #msg-box, SizeScreen #size-box, PlacesScreen #places-box, ChoiceScreen #choice-box, FindScreen #find-box, HelpScreen #help-box, FilterScreen #filter-box, UpdateScreen #update-box {
     background: $background;
     color: $foreground;
     border: heavy $primary;
@@ -214,20 +214,29 @@ InputScreen Input > .input--selection, FilterScreen Input > .input--selection {
     color: $foreground;
 }
 
-ChoiceScreen OptionList {
+ChoiceScreen OptionList, FindScreen OptionList {
     background: $background;
     color: $foreground;
     border: tall $foreground 40%;
 }
 
-ChoiceScreen OptionList:focus {
+ChoiceScreen OptionList:focus, FindScreen OptionList:focus {
     border: tall $primary;
 }
 
-ChoiceScreen OptionList > .option-list--option-highlighted {
+ChoiceScreen OptionList > .option-list--option-highlighted, FindScreen OptionList > .option-list--option-highlighted {
     background: $primary;
     color: $background;
     text-style: bold;
+}
+
+HelpScreen #help-scroll {
+    background: $background;
+    color: $foreground;
+    scrollbar-color: $foreground 40%;
+    scrollbar-color-hover: $primary;
+    scrollbar-color-active: $primary;
+    scrollbar-background: $background;
 }
 
 FilePanel {
