@@ -29,16 +29,22 @@ running an unauthenticated local HTTP server. This project deliberately:
 ## Install
 
 **Arch Linux / Omarchy.** An AUR package is on the way (`yay -S commandertui`).
-Until then, build it from the `PKGBUILD` in this repo. Install its two AUR
-preview dependencies first; `makepkg` resolves the remaining repository dependencies:
+Until then, build it from the `PKGBUILD` in this repo. `makepkg` resolves the
+repository dependencies. Image rendering and visual PDF pages use optional AUR
+packages; the app and its updater do not require them. PDF text preview works
+without the PDF renderer. Install image rendering separately if desired:
 
 ```bash
-yay -S --needed python-textual-image python-pypdfium2
+yay -S --needed python-textual-image
 git clone https://github.com/juniorbarchini-oss/commandertui.git
 cd commandertui/packaging/arch
 updpkgsums
 makepkg -si
 ```
+
+`python-pypdfium2` is also optional; its current AUR dependency on `libpdfium.so-64`
+does not match the AUR `libpdfium` package's provided soname, so visual PDF pages
+may be unavailable until that package dependency is corrected.
 
 Remove it with `sudo pacman -R commandertui`.
 
