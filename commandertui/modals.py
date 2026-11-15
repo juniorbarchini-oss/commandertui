@@ -5,6 +5,7 @@ from collections.abc import Callable
 import os
 import time
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -14,7 +15,7 @@ from textual.widgets import Button, DataTable, Input, OptionList, Static
 from .bookmarks import Place, all_places, remove_bookmark, save_bookmark
 from .models import OpKind, OperationQueue
 from .netlocations import is_smb_mount_point, local_path, remove_location, unmount
-from .scanner import tree_stats
+from .scanner import FIND_LIMIT, find_names, tree_stats
 
 
 def _human_bytes(n: int) -> str:
@@ -918,3 +919,268 @@ class ConflictScreen(ModalScreen):
     def on_button_pressed(self, event: Button.Pressed):
         event.stop()
         self.action_choose(event.button.id.removeprefix("conflict-"))
+
+
+class FindScreen(ModalScreen[str | None]):
+    """Search file and folder names under a folder, in a worker thread so a big tree or a
+    slow network share never freezes the UI. Results appear as they are found; Enter picks
+    one (dismisses with its full path), Escape stops the search and closes."""
+
+    DEFAULT_CSS = """
+    FindScreen {
+        align: center middle;
+    }
+    #find-box {
+        width: 90%;
+        min-width: 50;
+        max-width: 120;
+        height: auto;
+        max-height: 90%;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #find-status {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #find-list {
+        height: auto;
+        max-height: 16;
+    }
+    #find-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #find-buttons Button {
+        min-width: 18;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def __init__(self, root: str, pattern: str, show_hidden: bool = False) -> None:
+        super().__init__()
+        self.root = root
+        self.pattern = pattern
+        self.show_hidden = show_hidden
+        self.cancelled = False
+        self.results: list[str] = []
+        self._pending: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="find-box"):
+            yield Static("", id="find-status", markup=False)
+            yield OptionList(id="find-list")
+            with Horizontal(id="find-buttons"):
+                yield Button("Cancel  (Esc)", id="cancel")
+
+    def on_mount(self) -> None:
+        self._set_status(searching=True)
+        self.query_one("#find-list", OptionList).focus()
+        self.run_worker(self._work, thread=True)
+
+    def _set_status(self, *, searching: bool, truncated: bool = False) -> None:
+        count = len(self.results)
+        if searching:
+            text = f'Searching "{self.pattern}" in {self.root} ...  {count} found  (Esc stops)'
+        elif truncated:
+            text = f'"{self.pattern}": first {count} matches shown; narrow the search to see the rest'
+        elif count:
+            text = f'"{self.pattern}": {count} found  (Enter goes to the selected one)'
+        else:
+            text = f'Nothing matches "{self.pattern}" in {self.root}'
+        self.query_one("#find-status", Static).update(text)
+
+    def _work(self) -> None:
+        last = time.monotonic()
+
+        def on_found(path: str) -> None:
+            nonlocal last
+            self._pending.append(path)
+            now = time.monotonic()
+            if now - last >= 0.2:
+                last = now
+                batch, self._pending = self._pending, []
+                self.app.call_from_thread(self._add, batch, True, False)
+
+        _, truncated = find_names(
+            self.root,
+            self.pattern,
+            lambda: self.cancelled,
+            on_found,
+            show_hidden=self.show_hidden,
+            limit=FIND_LIMIT,
+        )
+        if not self.cancelled:
+            self.app.call_from_thread(self._add, self._pending, False, truncated)
+
+    def _add(self, batch: list[str], searching: bool, truncated: bool) -> None:
+        if self.cancelled or not self.is_mounted:
+            return
+        option_list = self.query_one("#find-list", OptionList)
+        first = not self.results
+        for path in batch:
+            self.results.append(path)
+            option_list.add_option(Text(os.path.relpath(path, self.root)))
+        if first and self.results:
+            option_list.highlighted = 0
+        self._set_status(searching=searching, truncated=truncated)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.cancelled = True
+        self.dismiss(self.results[event.option_index])
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.action_cancel()
+
+    def action_cancel(self) -> None:
+        self.cancelled = True
+        self.dismiss(None)
+
+
+HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "Moving around",
+        [
+            ("Tab", "Switch pane"),
+            ("Up / Down", "Move the cursor (Up from the first row reaches the column headers to sort)"),
+            ("Enter", "Open the folder, or preview the file"),
+            ("Backspace", "Go to the parent folder"),
+            ("g", "Go to a path you type or paste"),
+            ("p", "Places: disks, network locations and saved folders"),
+            ("f", "Find files and folders by name, including subfolders"),
+            ("/", "Filter the current list as you type"),
+            ("h", "Show or hide hidden files"),
+            ("r", "Refresh both panes"),
+        ],
+    ),
+    (
+        "Selecting",
+        [
+            ("Space", "Mark or unmark the item under the cursor"),
+            ("+  -  *", "Mark by pattern, unmark by pattern, invert marks"),
+            ("i", "Count files and total size of the marked items"),
+        ],
+    ),
+    (
+        "File operations (on the marked items, or the one under the cursor)",
+        [
+            ("F2", "Rename"),
+            ("F4", "Edit with your text editor"),
+            ("F5", "Copy to the other pane"),
+            ("F6", "Move to the other pane"),
+            ("F7", "Create a folder"),
+            ("F8 / Delete", "Delete (local files go to the trash)"),
+            ("z", "Create a .tar.gz in the other pane"),
+            ("x", "Extract an archive"),
+            ("c", "Compare the two panes"),
+        ],
+    ),
+    (
+        "File preview",
+        [
+            ("v / Enter", "Preview the file under the cursor"),
+            ("Esc", "Back to the file list"),
+            ("w", "Wrap long lines (text)"),
+            ("m", "Rendered or source view (Markdown)"),
+            ("f", "Image drawing mode (images, visual PDF)"),
+            ("g", "Text or visual page (PDF)"),
+            ("[  ]", "Previous or next page or sheet"),
+            ("s", "Pick a sheet (spreadsheets)"),
+            ("o", "Open with the system viewer (Quick Look on macOS)"),
+        ],
+    ),
+    (
+        "Compare screen",
+        [
+            ("m", "Mirror: make the right side equal to the left"),
+            ("u", "Update: copy new and newer files to the right"),
+            ("b", "Two-way sync"),
+            ("Space / c", "Mark differences by hand, then copy the marked ones"),
+            ("Esc", "Back"),
+        ],
+    ),
+    (
+        "Places",
+        [
+            ("a", "Add a network location"),
+            ("s", "Save the current folder"),
+            ("d", "Delete a saved entry"),
+            ("e", "Unmount a network share"),
+            ("l", "Change the login of a network location"),
+        ],
+    ),
+    (
+        "App",
+        [
+            ("t", "Color theme"),
+            ("u", "Check for updates"),
+            ("? / F1", "This help"),
+            ("q", "Quit"),
+        ],
+    ),
+]
+
+
+def help_text() -> str:
+    width = max(len(key) for _, rows in HELP_SECTIONS for key, _ in rows)
+    lines: list[str] = []
+    for title, rows in HELP_SECTIONS:
+        lines.append(title.upper())
+        lines.extend(f"  {key.ljust(width)}   {what}" for key, what in rows)
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+class HelpScreen(ModalScreen[None]):
+    """Every key of the app on one scrollable page."""
+
+    DEFAULT_CSS = """
+    HelpScreen {
+        align: center middle;
+    }
+    #help-box {
+        width: 90%;
+        min-width: 50;
+        max-width: 110;
+        height: 90%;
+        border: heavy $foreground;
+        padding: 1 3;
+    }
+    #help-scroll {
+        height: 1fr;
+    }
+    #help-buttons {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+    #help-buttons Button {
+        min-width: 18;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "close", "Close", priority=True),
+        Binding("enter", "close", "Close", priority=True),
+        Binding("question_mark", "close", "Close", priority=True),
+        Binding("f1", "close", "Close", priority=True),
+        Binding("q", "close", "Close", priority=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-box"):
+            with VerticalScroll(id="help-scroll"):
+                yield Static(help_text(), id="help-text", markup=False)
+            with Horizontal(id="help-buttons"):
+                yield Button("Close  (Esc)", id="close")
+
+    def on_mount(self) -> None:
+        self.query_one("#help-scroll", VerticalScroll).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.action_close()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
