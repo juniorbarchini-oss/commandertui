@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.7.3** — on-demand file previews on Linux and macOS; visual PDF pages on Arch through poppler. MIT licensed.
+Status: **v1.8.0** — Enter previews files, go to path, find by name and a help screen. MIT licensed.
 
 ---
 
@@ -260,6 +260,13 @@ black commandertui tests   # formatter, line length set in pyproject.toml
 Engine (scanner/diff/plan/sync/executor) is fully unit tested against a real
 filesystem (`tmp_path`). The UI has smoke tests via Textual's `Pilot`
 (boot sequence dismisses, pane switching, mark→copy→confirm end to end).
+
+The suite also runs on GitHub for every pull request and every push to `main` and
+`develop` (`.github/workflows/tests.yml`), so a failure shows up before a release is tagged.
+
+To change the version, run `python packaging/bump_version.py X.Y.Z`: it updates
+`commandertui/__init__.py`, the Arch `PKGBUILD`, the macOS `Info.plist` and the status line
+of this README together, and a test fails if they ever disagree.
 
 ## Not in scope
 
