@@ -4,7 +4,7 @@ Dual-pane terminal file manager: compare two folders, sync them, or move
 files/folders between them (and to USB/SMB/any mounted path) — with a
 phosphor-green 80s-terminal look and a short modem-style boot animation.
 
-Status: **v1.4.0** — 153/153 tests passing. MIT licensed.
+Status: **v1.7.0** — on-demand file previews on Linux and macOS. MIT licensed.
 
 ---
 
@@ -29,12 +29,14 @@ running an unauthenticated local HTTP server. This project deliberately:
 ## Install
 
 **Arch Linux / Omarchy.** An AUR package is on the way (`yay -S commandertui`).
-Until then, build it from the `PKGBUILD` in this repo. `makepkg` pulls in
-everything it needs:
+Until then, build it from the `PKGBUILD` in this repo. Install its two AUR
+preview dependencies first; `makepkg` resolves the remaining repository dependencies:
 
 ```bash
+yay -S --needed python-textual-image python-pypdfium2
 git clone https://github.com/juniorbarchini-oss/commandertui.git
 cd commandertui/packaging/arch
+updpkgsums
 makepkg -si
 ```
 
@@ -51,6 +53,21 @@ Or inside an activated virtual environment:
 ```bash
 pip install commandertui
 ```
+
+The standard installation and normal pip/pipx updates include all preview engines:
+images, PDF text and visual pages, Word `.docx`, and Excel `.xlsx`.
+The extras remain accepted aliases; PyPI users do not need an additional install step:
+
+```bash
+pipx install "commandertui[images]"      # inline terminal image rendering (textual-image + Pillow)
+pipx install "commandertui[documents]"   # PDF text + pagination, DOCX, XLSX (pypdf, python-docx, openpyxl)
+pipx install "commandertui[pdf-render]"  # PDF text + optional visual page rendering (pypdf, pypdfium2 + images)
+pipx install "commandertui[all]"         # everything above
+# or with pip inside a venv: pip install commandertui
+```
+
+CSV/TSV parsing uses Python's standard library. Reduced distro installations still
+show metadata when a preview engine is unavailable.
 
 **macOS.** Same Python package (`pipx install commandertui`), plus
 [kitty](https://sw.kovidgoyal.net/kitty/) for the standalone window. Places
@@ -119,7 +136,7 @@ o.window("^commandertui$", { float = true, center = true, size = { 1174, 637 } }
 | `/` | Filter the active pane by name (contains, ignores case) as you type; `Enter` keeps it, `Esc` clears it |
 | `+` / `-` / `*` | Mark / unmark by pattern (`*.iso`, or plain text = contains) / invert marks, over the rows shown |
 | `u` | Check for updates now (also the **Updates** button): asks PyPI right away and offers the new version if there is one |
-| `v` | Quick Look file preview (macOS only): opens `qlmanage -p` for the file under cursor; press `v` again or close the window to dismiss |
+| `v` | On-demand file preview (`Esc` returns to the same file): text (`w` wrap), Markdown (`m` source), images (`f` mode), PDF (`[`/`]` pages, `g` visual), DOCX text/tables, XLSX/CSV/TSV tables (`[`/`]` or `s` sheets), and metadata for unsupported/legacy files; on macOS `o` runs Quick Look (or `"preview_mode": "quicklook"` in `~/.config/commandertui/settings.json`) |
 | `i` | Size: file/folder count and total bytes of marked items (background, `Esc` stops it) |
 | `h` | Show/hide hidden (dot) files in both panes |
 | `t` | Color theme: Phosphor green (default), Phosphor amber, Nord, Gruvbox, Dracula, Tokyo Night, Catppuccin Mocha, Solarized Dark, Monokai, Textual Dark. Previews as you move, Enter keeps it (saved in `~/.config/commandertui/settings.json`), Esc goes back |
@@ -207,7 +224,10 @@ commandertui/
 ├── bookmarks.py             # detected mounts (USB/SMB/rclone) + saved places
 ├── netlocations.py           # SMB/SFTP/FTP locations via gio (list shares, mount, save)
 ├── theme.py                  # phosphor green/amber themes + the stylesheet (Textual theme variables)
-├── settings.py               # saved settings (color theme)
+├── settings.py               # saved settings (color theme, sort order, preview mode)
+├── preview.py                # safe on-demand preview loader, isolated worker + macOS Quick Look
+├── preview_docs.py           # Stage 2 adapters (PDF, DOCX, XLSX, CSV/TSV) + OOXML safety checks
+├── preview_screen.py         # full-screen file previewer (text, Markdown, images, PDF, tables)
 ├── boot.py                    # startup "modem" reveal animation
 ├── widgets.py                  # FilePanel: one pane's directory listing
 ├── modals.py                    # Confirm / Places / Input / Size / Message screens
@@ -232,8 +252,9 @@ filesystem (`tmp_path`). The UI has smoke tests via Textual's `Pilot`
 
 ## Not in scope
 
-No file preview, no deduplication engine, no desktop GUI wrapper — those are
-different problems.
+No deduplication engine, no desktop GUI wrapper — those are
+different problems. (Automatic live preview while navigating and legacy
+binary/OpenDocument conversion via LibreOffice are intentionally out of scope.)
 
 ## Credits
 
@@ -316,3 +337,19 @@ Delete confirmations show GVFS connection URIs (for example
 local items going to trash appears only for mixed selections. File sizes come from metadata; folder or
 unreadable sizes stay unknown and suppress the total instead of showing zero
 or scanning a remote tree before confirmation.
+
+## File preview (Stage 1 + Stage 2)
+
+Pressing `v` opens an on-demand full-screen preview for the file under the cursor (`Esc` closes the viewer and returns to the same file and cursor row):
+
+- **On-demand only:** Navigating through folders (including `rclone` FUSE mounts) never reads or downloads file contents until `v` is pressed.
+- **Process isolation & cancellation:** Previews (including ZIP/OOXML validation, parsing, and PDF rasterization) run inside an isolated worker process group with an outer wall-clock grace margin (`+2s` above the internal 5s/10s read/decode deadline) so pressing `Esc`, switching pages/sheets rapidly, or hitting blocked I/O terminates cleanly and discards stale results.
+- **Text & code:** Read-only viewer with line numbers (`w` toggles soft wrap). Byte (512 KiB), line (10,000 lines), and internal time (5s) caps apply; terminal escape/control sequences are sanitized, and previewed files are never executed.
+- **Markdown:** Rendered view with external link opening disabled (`m` toggles rendered vs. raw read-only source).
+- **Images:** Included `textual-image` + `Pillow` engines render via Kitty TGP / Sixel / half-cell / Unicode (`f` cycles `auto` / `halfcell` / `unicode`), enforcing byte (25 MiB), pixel (25 MP), and internal decode time (10s) limits. If an engine is unavailable, CommanderTUI shows metadata and header dimensions.
+- **Image mode and terminal compatibility:** Without a saved preference, Herdr sessions start in `halfcell`; other terminals start in `auto`. Pressing `f` saves the chosen mode in `~/.config/commandertui/settings.json` for subsequent previews and restarts, including when switching terminals. If an image or visual PDF page appears blank, press `f` to try another mode. Images fit the viewport with a maximum of 256 terminal cells per axis; deferred Rich image-rendering errors fall back to half-cell rendering.
+- **PDF:** Uses the included `pypdf` engine for selectable text per page (`[` / `]` to move pages, 200k char cap/page, 25 MiB file cap, 10s limit). Pressing `g` switches to visual page rendering with `pypdfium2` (rasterized in the isolated worker, capped at 25 MP / 1600 px, forms non-interactive). Encrypted or corrupt PDFs fall back to safe metadata.
+- **Word `.docx`:** Uses the included `python-docx` engine to extract headings, paragraphs, and tables in readable document order (not pixel-exact Word layout), guarded by pre-parse ZIP/OOXML limits (25 MiB compressed, 50 MiB total uncompressed, 2,000 entries, XML `DOCTYPE`/`ENTITY` rejection, 512 KiB text cap, 200 tables cap). Encrypted/corrupt files fall back to metadata.
+- **Spreadsheets (`.csv` / `.tsv` / `.xlsx`):** Displayed as an interactive table capped at 500 rows, 50 columns, 20,000 cells, and 200 chars/cell. For `.xlsx`, `[` / `]` steps worksheets and `s` opens the sheet selector; the included `openpyxl` engine reads in `read_only=True, data_only=True, keep_vba=False, keep_links=False` mode, showing stored cached values (or literal formula strings as data if no cached value exists) without ever running macros, evaluating formulas, or fetching external links.
+- **Legacy Office, OpenDocument, media & archives:** Legacy `.doc`, `.xls`, `.ppt`, macro-enabled `.docm`/`.xlsm`/`.pptm`, OpenDocument (`.ods`/`.odt`/`.odp`), audio/video, archives, binaries, FIFOs, and broken symlinks show safe metadata and why integrated preview is disabled (LibreOffice / external converters are never invoked).
+- **macOS Quick Look:** Available inside the viewer via `o` (`Quick Look`), or set `"preview_mode": "quicklook"` in `~/.config/commandertui/settings.json` to make `v` launch `qlmanage -p` directly.

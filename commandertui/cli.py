@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from . import __version__
+from . import __version__, preview
 from .app import CommanderApp
 
 
@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"commandertui {__version__}")
     args = parser.parse_args()
 
+    preview.prepare_image_terminal()
     app = CommanderApp(left_path=args.left, right_path=args.right, check_updates=not args.no_update_check)
     app.run()
 

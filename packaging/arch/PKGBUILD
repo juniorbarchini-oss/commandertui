@@ -1,13 +1,15 @@
 # Maintainer: Humberto Barchini
 
 pkgname=commandertui
-pkgver=1.4.0
+pkgver=1.7.0
 pkgrel=1
 pkgdesc="Dual-pane retro terminal file manager: compare, sync, copy and move folders"
 arch=('any')
 url="https://github.com/juniorbarchini-oss/commandertui"
 license=('MIT')
-depends=('python' 'python-textual' 'python-send2trash')
+depends=('python' 'python-textual' 'python-send2trash' 'python-textual-image'
+         'python-pillow' 'python-pypdf' 'python-docx' 'python-openpyxl'
+         'python-pypdfium2')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 checkdepends=('python-pytest' 'python-pytest-asyncio')
 optdepends=(
@@ -16,7 +18,8 @@ optdepends=(
   'gvfs: see network shares mounted by Nautilus in Places'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('867a4121ebd10e6cd76401fd4742cbae72b2af5d16a0e3a21a467bc93c88d619')
+# Generate the checksum from the published release with updpkgsums before building.
+sha256sums=('SKIP')
 
 build() {
   cd "$pkgname-$pkgver"
